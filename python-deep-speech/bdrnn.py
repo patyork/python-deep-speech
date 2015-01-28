@@ -55,8 +55,10 @@ class FeedForwardLayer:
         self.ActivationFn = np.frompyfunc(activation, 1, 1)
         self.DActivationFn = np.frompyfunc(activation_prime, 1, 1)
         self.inputs = inputs
-        self.outputs = None
         self.activations = None
+        self.activationHistory = None
+        self.outputs = None
+        self.outputHistory = None
         self.learningRate = learningRate
         self.momentumFactor = .7
         self.previousDelta = None
@@ -192,22 +194,10 @@ class BDRNN:
         assert(self.layers is not None)
 
         # get the output from the first layer for each window of data
-        '''if isinstance(self.layers[0], RecurrentForwardLayer) or isinstance(self.layers[0], RecurrentBackwardLayer):
-            outputs = self.layers[0].predict(input_stream)
-            print 'hit bd'
-        else:
-            outputs = [np.asarray(self.layers[0].predict(win), dtype=float) for win in self.apply_window(input_stream)]
-            print 'hit ff' '''
         outputs = self.layers[0].predict_series(self.apply_window(input_stream))
 
         # repeat for following layers
         for i in range(1, len(self.layers)):
-            '''if isinstance(self.layers[i], RecurrentForwardLayer) or isinstance(self.layers[i], RecurrentBackwardLayer):
-                outputs = self.layers[i].predict(outputs)
-                print 'hit bd'
-            else:
-                outputs = [np.asarray(self.layers[i].predict(win), dtype=float) for win in outputs]
-                print 'hit ff' '''
             outputs = self.layers[i].predict_series(outputs)
 
         return outputs
