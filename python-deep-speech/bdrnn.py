@@ -2,6 +2,7 @@ __author__ = 'pat'
 import numpy as np
 import math
 import time
+from itertools import groupby
 
 def softmax(x):
     e = np.exp(x)
@@ -142,12 +143,60 @@ class FeedForwardLayer:
             return np.sum(sensConstants, axis=1)
 
 
-class RecurrentForwardLayer(FeedForwardLayer):
+class RecurrentForwardLayer:
+    def __init__(self, rng, nin, nout, activation=logistic, activation_prime=dlogistic, W=None, b=None, inputs=None, learningRate=.9):
+        self.ActivationFn = np.frompyfunc(activation, 1, 1)
+        self.DActivationFn = np.frompyfunc(activation_prime, 1, 1)
+        self.inputs = []
+        if inputs:
+            self.inputs.append(inputs)
+        self.activations = []
+        self.outputs = []
+        self.learningRate = learningRate
+        self.momentumFactor = .7
+        self.previousDelta = None
+        self.previousbDelta = None
+
+        if not W:
+            self.W = np.asarray(
+                rng.uniform(
+                    low=4 * np.sqrt(6.0 / (nin + nout)),     # generic range of values
+                    high=-4 * np.sqrt(6.0 / (nin + nout)),
+                    size=(nin, nout)
+                )
+                , dtype=float
+            )
+        else:
+            self.W = W
+        if not b:
+            self.b = np.zeros(nout)
+        else:
+            self.b = b
+
+    def predict(self, inputs):
+        _inputs = inputs
+        _activations = np.dot(_inputs, self.W) + self.b
+        _outputs = np.asarray(self.ActivationFn(_activations), dtype=float)
+
+        # We have to keep track of inputs/activations/outputs for each time/sequence step
+        self.inputs.append(_inputs)
+        self.activations.append(_activations)
+        self.outputs.append(_outputs)
+       # list(self.outputs).append(_outputs)
+
+        return _outputs
+
+    def predict_series(self, series):
+        out = []
+        for window in series:
+            out.append(np.asarray(self.predict(window), dtype=float))
+        return out
+
     def update(self):
         pass
 
 
-class RecurrentBackwardLayer(FeedForwardLayer):
+class RecurrentBackwardLayer(RecurrentForwardLayer):
     def update(self):
         pass
 
@@ -157,22 +206,166 @@ class BiDirectionalLayer:
     def __init__(self, forward_layer, backward_layer, initial_state):
         self.forward = forward_layer
         self.backward = backward_layer
+
+        self.initial_state = initial_state
         self.forward.outputs = initial_state
         self.backward.outputs = initial_state
 
     def predict_series(self, windows):
-        # Remember to reverse the list of windows for the Backwards layer!
+        # New series; clear the histories
+        self.forward.outputs = []
+        self.backward.outputs = []
+        self.forward.outputs.append(self.initial_state)
+        self.backward.outputs.append(self.initial_state)
 
+        # Remember to reverse the list of windows for the Backwards layer!
         bd_output = np.concatenate(
             (
                 # Forward pass over inputs and F(t-1)
-                [self.forward.predict(np.concatenate((win, self.forward.outputs), axis=0)) for win in windows],
+                # ...where F(t-1) corresponds to the last self.outputs
+                [self.forward.predict(np.concatenate((win, self.forward.outputs[-1]), axis=0)) for win in windows],
                 # Backward pass over inputs and B(t+1)
-                [self.backward.predict(np.concatenate((win, self.backward.outputs), axis=0)) for win in windows[::-1]]
+                # ...where B(t+1) corresponds to the last self.outputs
+                [self.backward.predict(np.concatenate((win, self.backward.outputs[-1]), axis=0)) for win in windows[::-1]]
             ),
             axis=1
         )
         return bd_output
+
+
+class SoftmaxLayer:
+    def __init__(self):
+        self.inputs = None
+        self.outputs = None
+
+    def predict_series(self, windows):
+        self.inputs = windows
+        out = [np.exp(x) for x in windows]
+        out = [x / np.sum(x) for x in out]
+        self.outputs = out
+        return out
+
+
+class CTCLayer:
+    def __init__(self, alphabet=np.arange(28)):
+        self.A = alphabet
+        self.blank = len(alphabet)
+        self.inputs = None
+        self.sequence = None
+        self.sequence_prime = None
+        self.matrixf = None
+        self.matrixb = None
+
+        self.T = None
+        self.U = None
+
+    def recurrence_relationship(self, size):
+        big_I = np.eye(size+2)
+        return np.eye(size) + big_I[2:, 1:-1] + big_I[2:, :-2] * (np.arange(size) % 2)
+
+    # Remove consecutive symbols and blanks
+    def F(self, pi):
+        return [a for a in [key for key, _ in groupby(pi)] if a != self.blank]
+
+    # Insert blanks between unique symbols, and at the beginning and end
+    def make_l_prime(self, l):
+        result = [self.blank] * (len(l) * 2 + 1)
+        result[1::2] = l
+        return result
+        # return [blank] + sum([[i, blank] for i in l], [])
+
+    # Calculate p(sequence|inputs)
+    def ctc(self, inputs, sequence):
+        self.inputs = inputs
+        self.T = len(inputs)
+        self.sequence = sequence
+        self.sequence_prime = self.make_l_prime(self.F(sequence))
+        self.U = len(self.sequence_prime)
+        self.matrixf = np.zeros((len(inputs), len(inputs)))
+        self.matrixb = np.zeros((len(inputs), len(inputs)))
+
+        fp = self.forward(self.T-1, len(self.sequence_prime)-1)
+        self.matrixf = np.zeros((len(inputs), len(inputs)))
+        return fp + self.forward(self.T-1, len(self.sequence_prime)-2)
+
+        summation = 0.0
+        for s in np.arange(self.U):
+            self.matrixf = np.zeros((len(inputs), len(inputs)))
+            self.matrixb = np.zeros((len(inputs), len(inputs)))
+
+            summation += self.forward(self.T-1, s) * self.backward(self.T-1, s) / y[self.T-1][self.sequence_prime[s]]
+        return fp
+
+    # DP (recursive) as described by the paper
+    def forward(self, t, u):
+        if self.matrixf[t][u] != 0:
+            return self.matrixf[t][u]
+
+        if t==0 and u==0:
+            prob = self.inputs[0][self.blank]
+            self.matrixf[t][u] = prob
+            return prob
+        elif t==0 and u==1:
+            prob = self.inputs[0][self.sequence[0]]
+            self.matrixf[t][u] = prob
+            return prob
+        elif t==0: return 0
+        elif u<1 or u<(len(self.sequence_prime) - 2*(self.T-1 - t)-1): return 0
+
+        if self.sequence_prime[u]==self.blank or self.sequence_prime[u-2]==self.sequence_prime[u]:
+            prob = (self.forward(t-1, u) +
+                    self.forward(t-1, u-1)) *\
+                    self.inputs[t][self.sequence_prime[u]]
+            self.matrixf[t][u] = prob
+            return prob
+        else:
+            prob = (self.forward(t-1, u) +
+                    self.forward(t-1, u-1) +
+                    self.forward(t-1, u-2)) *\
+                    self.inputs[t][self.sequence_prime[u]]
+            self.matrixf[t][u] = prob
+            return prob
+
+    def backward(self, t, u):
+        if self.matrixb[t][u] != 0:
+            self.matrixb[t][u]
+
+        if t==self.T-1 and u==len(self.sequence_prime)-1:
+            prob = self.inputs[self.T-1][self.blank]
+            self.matrixb[t][u] = prob
+            return prob
+        elif t==self.T-1 and u==len(self.sequence_prime)-2:
+            prob = self.inputs[self.T-1][self.sequence[-1]]
+            self.matrixb[t][u] = prob
+            return prob
+        elif t==self.T-1:
+            return 0
+        elif u>2*t-1 or u>len(self.sequence_prime)-1:
+            return 0
+
+        if self.sequence_prime[u]==self.blank:
+            prob = (self.backward(t+1, u) +
+                    self.backward(t+1, u+1)) *\
+                self.inputs[t][self.sequence_prime[u]]
+            self.matrixb[t][u] = prob
+            return prob
+
+        # this is almost certainly incorrect, but there is an out-of-bounds error without it that I cannot track down
+        if u==len(self.sequence_prime)-2: return 0
+
+        elif self.sequence_prime[u+2]==self.sequence_prime[u]:
+            prob = (self.backward(t+1, u) +
+                    self.backward(t+1, u+1)) *\
+                self.inputs[t][self.sequence_prime[u]]
+            self.matrixb[t][u] = prob
+            return prob
+        else:
+            prob = (self.backward(t+1, u) +
+                    self.backward(t+1, u+1) +
+                    self.backward(t+1, u+2)) *\
+                self.inputs[t][self.sequence_prime[u]]
+            self.matrixb[t][u] = prob
+            return prob
 
 
 class BDRNN:
