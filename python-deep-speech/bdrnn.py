@@ -4,11 +4,14 @@ import math
 import time
 from itertools import groupby
 
+
 def softmax(x):
     e = np.exp(x)
     return e / np.sum(np.exp(x))
 
-def logistic(x): return 1.0/(1.0 + np.exp(-x))
+
+def logistic(x):
+    return 1.0/(1.0 + np.exp(-x))
 
 
 def dlogistic(y):
@@ -140,11 +143,130 @@ class FeedForwardLayer:
             self.previousbDelta = bdelta
 
             sensConstants = np.multiply(sens, self.W)
-            return np.sum(sensConstants, axis=1)
+            return np.average(sensConstants, axis=1)
+
+
+class FeedForwardLayerRNN:
+    def __init__(self, rng, nin, nout, activation=logistic, activation_prime=dlogistic, W=None, b=None, inputs=None, learningRate=.99):
+        self.ActivationFn = np.frompyfunc(activation, 1, 1)
+        self.DActivationFn = np.frompyfunc(activation_prime, 1, 1)
+
+        self.inputs = []
+        if inputs: self.inputs.append(inputs)
+        self.activations = []
+        self.outputs = []
+
+        self.learningRate = learningRate
+        self.momentumFactor = 0     # TODO: ensure momentum is still implemented correctly
+        self.previousDelta = None
+        self.previousbDelta = None
+
+        W = np.zeros((nin, nout))
+        if W is not None:
+            self.W = np.asarray(
+                rng.uniform(
+                    low=4 * np.sqrt(6.0 / (nin + nout)),     # generic range of values
+                    high=-4 * np.sqrt(6.0 / (nin + nout)),
+                    size=(nin, nout)
+                )
+                , dtype=float
+            )
+        else:
+            self.W = W
+        if not b:
+            self.b = np.zeros(nout)
+        else:
+            self.b = b
+
+    def predict(self, inputs):
+        self.inputs.append(inputs)
+        self.activations.append(np.dot(inputs, self.W) + self.b)
+        self.outputs.append(np.asarray(self.ActivationFn(self.activations[-1]), dtype=float))
+        return self.outputs[-1]
+
+    def predict_series(self, series):
+        # TODO: this can be optimized, probably
+
+        self.activations = []
+        self.inputs = []
+        self.outputs = []
+
+        out = []
+        for window in series:
+            out.append(np.asarray(self.predict(window), dtype=float))
+
+        #return self.outputs
+        return out
+
+    def update(self, targets=None, sensitivityConstants=None):
+
+        # If this is an output layer with a well defined notion of a target series
+        if targets is not None:
+            # TODO: implement and test this functionality for cases where CTC is not used
+            for target in targets:
+                sens = np.subtract(self.outputs, targets) * self.DActivationFn(self.activations)
+
+                d = []
+                for s in sens:
+                    for i in self.inputs:
+                        d.append(s * i)
+                gradient = np.array(d).reshape(self.W.shape)
+                # gradient = np.multiply(sens, np.tile(self.input, (len(sens), 1)))
+
+                delta = (-self.learningRate * gradient).reshape(self.W.shape)
+                bdelta = (-self.learningRate * sens).reshape(self.b.shape)
+                self.W += delta + (self.momentumFactor * self.previousDelta if self.previousDelta is not None else 0)
+                self.b += bdelta + (self.momentumFactor * self.previousbDelta if self.previousbDelta is not None else 0)
+                self.previousDelta = delta
+                self.previousbDelta = bdelta
+
+                sensConstants = np.multiply(sens, self.W)
+                return np.sum(sensConstants, axis=1)
+
+        elif sensitivityConstants is not None:
+            # Ensure that we have as many sensitivity constants as we do timesteps/activations
+            assert(len(self.activations)==len(sensitivityConstants))
+
+            # Apply updates in any order for feed-forward layers
+            backwardSensConstants = []
+
+            wDeltas = []
+            bDeltas = []
+
+            for t in np.arange(len(self.activations)):
+
+                sens = np.multiply(np.asarray(sensitivityConstants[t]).transpose(), self.DActivationFn(self.activations[t])).transpose()
+
+                d=[]
+                for s in sens:
+                    for i in self.inputs[t]:
+                        d.append(s*i)
+                gradient = np.array(d).reshape(self.W.shape)
+                #gradient = sens * self.input
+
+                # Calculate sensConstants before updating weights
+                sensConstants = np.multiply(sens, self.W)
+                backwardSensConstants.append(np.sum(sensConstants, axis=1))
+
+                wDeltas.append((-self.learningRate * gradient).reshape(self.W.shape))
+                bDeltas.append((-self.learningRate * sens).reshape(self.b.shape))
+
+
+                #delta = (-self.learningRate * gradient).reshape(self.W.shape)
+                #bdelta = (-self.learningRate * sens).reshape(self.b.shape)
+                #self.W += delta + (self.momentumFactor * self.previousDelta if self.previousDelta is not None else 0)
+                #self.b += bdelta + (self.momentumFactor * self.previousbDelta if self.previousbDelta is not None else 0)
+                #self.previousDelta = delta
+                #self.previousbDelta = bdelta
+
+            # Update batch weights
+            self.W += np.sum(wDeltas, axis=0)
+            self.b += np.sum(bDeltas, axis=0)
+            return backwardSensConstants
 
 
 class RecurrentForwardLayer:
-    def __init__(self, rng, nin, nout, activation=logistic, activation_prime=dlogistic, W=None, b=None, inputs=None, learningRate=.9):
+    def __init__(self, rng, nin, nout, activation=logistic, activation_prime=dlogistic, W=None, b=None, inputs=None, learningRate=.99):
         self.ActivationFn = np.frompyfunc(activation, 1, 1)
         self.DActivationFn = np.frompyfunc(activation_prime, 1, 1)
         self.inputs = []
@@ -157,7 +279,10 @@ class RecurrentForwardLayer:
         self.previousDelta = None
         self.previousbDelta = None
 
-        if not W:
+        self.nout = nout
+
+        W = np.zeros((nin, nout))
+        if W is not None:
             self.W = np.asarray(
                 rng.uniform(
                     low=4 * np.sqrt(6.0 / (nin + nout)),     # generic range of values
@@ -187,18 +312,83 @@ class RecurrentForwardLayer:
         return _outputs
 
     def predict_series(self, series):
+        self.inputs = []
+        self.activations = []
+        self.outputs = []
+
         out = []
         for window in series:
             out.append(np.asarray(self.predict(window), dtype=float))
         return out
 
-    def update(self):
-        pass
+    def update(self, sensitivityConstants):
+        assert(len(self.activations)==len(sensitivityConstants))
+
+        # The update for the forward layer must go back in time (T-1 -> 0)
+        # We must also loop over the activations/inputs in backwards order
+        backwardSensConstants = []
+        wDeltas = []
+        bDeltas = []
+
+        for t in np.arange(len(self.activations)-1, -1, -1):
+            # Rationalization: the sensitivity constants are the dot product for all weights coming into the output layer
+            # That means that only some of the sensitivity constants are applicable to the forward or backward layer
+            # ...namely, the first half.
+            sens = np.multiply(np.asarray(sensitivityConstants[t][self.nout:]).transpose(), self.DActivationFn(self.activations[t])).transpose()
+            #sens = np.multiply(np.asarray(sensitivityConstants[t][:self.nout]).transpose(), self.DActivationFn(self.activations[t])).transpose()
+
+            d=[]
+            for s in sens:
+                for i in self.inputs[t]:
+                    d.append(s*i)
+            gradient = np.array(d).reshape(self.W.shape)
+            #gradient = sens * self.input
+
+            # Calculate sensConstants before updating weights
+            sensConstants = np.multiply(sens, self.W)
+            backwardSensConstants.append(np.sum(sensConstants, axis=1))
+
+            wDeltas.append((-self.learningRate * gradient).reshape(self.W.shape))
+            bDeltas.append((-self.learningRate * sens).reshape(self.b.shape))
+
+        # update batch weights
+        self.W += np.sum(wDeltas, axis=0)
+        self.b += np.sum(bDeltas, axis=0)
+        return backwardSensConstants
 
 
 class RecurrentBackwardLayer(RecurrentForwardLayer):
-    def update(self):
-        pass
+    def update(self, sensitivityConstants):
+        assert(len(self.activations)==len(sensitivityConstants))
+
+        backwardSensConstants = []
+        wDeltas = []
+        bDeltas = []
+
+        for t in np.arange(len(self.activations)):
+
+            # See RecurrentForwardLayer for an explanation of the slicing of the sensitivityConstants
+            sens = np.multiply(np.asarray(sensitivityConstants[t][:self.nout]).transpose(), self.DActivationFn(self.activations[t])).transpose()
+            #sens = np.multiply(np.asarray(sensitivityConstants[t][self.nout:]).transpose(), self.DActivationFn(self.activations[t])).transpose()
+
+            d=[]
+            for s in sens:
+                for i in self.inputs[t]:
+                    d.append(s*i)
+            gradient = np.array(d).reshape(self.W.shape)
+            #gradient = sens * self.input
+
+            # Calculate sensConstants before updating weights
+            sensConstants = np.multiply(sens, self.W)
+            backwardSensConstants.append(np.sum(sensConstants, axis=1))
+
+            wDeltas.append((-self.learningRate * gradient).reshape(self.W.shape))
+            bDeltas.append((-self.learningRate * sens).reshape(self.b.shape))
+
+        # update batch weights
+        self.W += np.sum(wDeltas, axis=0)
+        self.b += np.sum(bDeltas, axis=0)
+        return backwardSensConstants
 
 
 # This class acts as a wrapper for a layer that consists of a Forward and a Backward recurrent layer
@@ -213,9 +403,14 @@ class BiDirectionalLayer:
 
     def predict_series(self, windows):
         # New series; clear the histories
+        self.forward.inputs = []
+        self.forward.activations = []
         self.forward.outputs = []
-        self.backward.outputs = []
         self.forward.outputs.append(self.initial_state)
+
+        self.backward.inputs = []
+        self.backward.activations = []
+        self.backward.outputs = []
         self.backward.outputs.append(self.initial_state)
 
         # Remember to reverse the list of windows for the Backwards layer!
@@ -232,6 +427,12 @@ class BiDirectionalLayer:
         )
         return bd_output
 
+    def update(self, sensitivityConstants=None):
+        # TODO: retrieve the sentitvity constants from the Bidirectional layer correctly
+        fs = [self.forward.update(sensitivityConstants)]
+        bs = [self.backward.update(sensitivityConstants)]
+        pass
+
 
 class SoftmaxLayer:
     def __init__(self):
@@ -240,12 +441,14 @@ class SoftmaxLayer:
 
     def predict_series(self, windows):
         self.inputs = windows
-        out = [np.exp(x) for x in windows]
+        win_max = [(np.max(x), x) for x in windows]
+        out = [np.exp(x[1]-x[0]) for x in win_max]
         out = [x / np.sum(x) for x in out]
         self.outputs = out
         return out
 
-
+# TODO: Implement a non-recursive CTC algorithm
+# TODO: Implement the CTC algorithm in log-scale to prevent underflow; exponentiate only after the summation?
 class CTCLayer:
     def __init__(self, alphabet=np.arange(28)):
         self.A = alphabet
@@ -281,17 +484,17 @@ class CTCLayer:
         self.sequence = sequence
         self.sequence_prime = self.make_l_prime(self.F(sequence))
         self.U = len(self.sequence_prime)
-        self.matrixf = np.zeros((len(inputs), len(inputs)))
-        self.matrixb = np.zeros((len(inputs), len(inputs)))
+        self.matrixf = np.zeros((self.T, self.T))
+        self.matrixb = np.zeros((self.T, self.T))
 
-        fp = self.forward(self.T-1, len(self.sequence_prime)-1)
-        self.matrixf = np.zeros((len(inputs), len(inputs)))
-        return fp + self.forward(self.T-1, len(self.sequence_prime)-2)
+        fp = self.forward(self.T-1, self.U-1)
+        self.matrixf = np.zeros((self.T, self.T))
+        return fp + self.forward(self.T-1, self.U-2)
 
         summation = 0.0
         for s in np.arange(self.U):
-            self.matrixf = np.zeros((len(inputs), len(inputs)))
-            self.matrixb = np.zeros((len(inputs), len(inputs)))
+            self.matrixf = np.zeros((self.T, self.T))
+            self.matrixb = np.zeros((self.T, self.T))
 
             summation += self.forward(self.T-1, s) * self.backward(self.T-1, s) / y[self.T-1][self.sequence_prime[s]]
         return fp
@@ -367,6 +570,29 @@ class CTCLayer:
             self.matrixb[t][u] = prob
             return prob
 
+    def alpha_beta(self, inputs, sequence):
+        self.inputs = inputs
+        self.T = len(inputs)
+        self.sequence = sequence
+        self.sequence_prime = self.make_l_prime(self.F(sequence))
+        self.U = len(self.sequence_prime)
+        self.matrixf = np.zeros((self.T, self.T))
+        self.matrixb = np.zeros((self.T, self.T))
+
+        alpha_beta = []
+
+        for t in np.arange(self.T):
+            ab_t = []
+            for u in np.arange(self.U):
+                self.matrixf = np.zeros((self.T, self.T))
+                self.matrixb = np.zeros((self.T, self.T))
+                _f = self.forward(t, u)
+                _b = self.backward(t, u)
+                ab_t.append(_f * _b)
+            alpha_beta.append(ab_t)
+
+        return np.asarray(alpha_beta, dtype=float)
+
 
 class BDRNN:
     def __init__(self, defined_layers=None, window_width=0):
@@ -395,43 +621,37 @@ class BDRNN:
 
         return outputs
 
+    # Train upon a single input sequence
+    def train(self, input_stream, z, ctc_layer):
+        y = self.predict(input_stream)      # output from the softmax layer
 
-    def train(self, input_streams):
-        for input_stream in input_streams:
-            pass
+        aB = ctc_layer.alpha_beta(y, z)
+        p_z_x = ctc_layer.ctc(y, z)                     # TODO: ensure this is a correct approach, or use the summation
+        #p_z_x = (np.sum(aB[-1])/y[-1])[-1]
+        z_prime = ctc_layer.make_l_prime(ctc_layer.F(z))
 
-def test():
-    test_2d_sequence = np.asarray([
-        [0, 0],
-        [1, 1],
-        [2, 2],
-        [3, 3],
-        [4, 4]
-    ])
-    print type(test_2d_sequence)
+        # calculate the derivative of the loss with respect to the activations at the output
+        K = []
+        for k in np.arange(len(ctc_layer.A)+1):
+            K.append([x for x in np.where(z_prime==k)[0]])
 
-    win_size = 0
-    dimensionality = 2
-    rng = np.random.RandomState(123)
+        sensitivities = []
+        for t in np.arange(ctc_layer.T):
+            sens_t = []
+            for k in np.arange(len(K)):
 
-    h1 = FeedForwardLayer(rng, 2*dimensionality*win_size + dimensionality, 3)
-    h2 = FeedForwardLayer(rng, 3, 3)
-    h3 = FeedForwardLayer(rng, 3, 2)
+                summation = 0.0
+                for u in K[k]:
+                    summation += aB[t][u]
 
-    recurrency_output_count = 2
-    f1 = RecurrentForwardLayer(rng, 2 + recurrency_output_count, recurrency_output_count)
-    b1 = RecurrentBackwardLayer(rng, 2 + recurrency_output_count, recurrency_output_count)
-    bd1 = BiDirectionalLayer(f1, b1, initial_state=np.zeros(recurrency_output_count))
+                sens_t.append(y[t][k] - (1.0/p_z_x)*summation)
+            sensitivities.append(sens_t)
 
-    o = FeedForwardLayer(rng, 2*recurrency_output_count, 2)
+        # TODO: Make this generic
+        sensitivities = self.layers[-2].update(sensitivityConstants=sensitivities)   # Output layer
+        sensitivities = self.layers[-3].update(sensitivityConstants=sensitivities)   # Bidirectional layer
 
-    bdrnn = BDRNN([h1, h2, h3, bd1, o], window_width=win_size)
+        #for i in len(self.layers)-2:
+        #    sensitivities = self.layers[i].update(sensitivityConstants=sensitivities)   # Output layer
 
-
-
-    print bdrnn.predict(test_2d_sequence)
-
-    t0 = time.time()
-    for i in range(10000):
-        bdrnn.predict(test_2d_sequence)
-    print time.time() - t0
+        return p_z_x
