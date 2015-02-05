@@ -11,7 +11,16 @@ def softmax(x):
 
 
 def logistic(x):
-    return 1.0/(1.0 + np.exp(-x))
+    #"Numerically-stable sigmoid function."
+    if x >= 0:
+        z = np.exp(-x)
+        return 1 / (1 + z)
+    else:
+        # if x is less than zero then z will be small, denom can't be
+        # zero because it's 1+z.
+        z = np.exp(x)
+        return z / (1 + z)
+    #return 1.0/(1.0 + np.exp(-x))
 
 
 def dlogistic(y):
@@ -147,7 +156,7 @@ class FeedForwardLayer:
 
 
 class FeedForwardLayerRNN:
-    def __init__(self, rng, nin, nout, activation=logistic, activation_prime=dlogistic, W=None, b=None, inputs=None, learningRate=.99):
+    def __init__(self, rng, nin, nout, activation=logistic, activation_prime=dlogistic, W=None, b=None, inputs=None, learningRate=.2):
         self.ActivationFn = np.frompyfunc(activation, 1, 1)
         self.DActivationFn = np.frompyfunc(activation_prime, 1, 1)
 
@@ -161,8 +170,8 @@ class FeedForwardLayerRNN:
         self.previousDelta = None
         self.previousbDelta = None
 
-        W = np.zeros((nin, nout))
-        if W is not None:
+        #W = np.zeros((nin, nout))
+        if W is None:
             self.W = np.asarray(
                 rng.uniform(
                     low=4 * np.sqrt(6.0 / (nin + nout)),     # generic range of values
@@ -224,17 +233,15 @@ class FeedForwardLayerRNN:
                 return np.sum(sensConstants, axis=1)
 
         elif sensitivityConstants is not None:
+            #print len(self.activations), len(sensitivityConstants), np.shape(self.activations), np.shape(sensitivityConstants)
             # Ensure that we have as many sensitivity constants as we do timesteps/activations
             assert(len(self.activations)==len(sensitivityConstants))
 
-            # Apply updates in any order for feed-forward layers
+            # Find the new deltas using what we know from the layer above (SUM(deltas*weights) == sensitivity constants
             backwardSensConstants = []
-
             wDeltas = []
             bDeltas = []
-
             for t in np.arange(len(self.activations)):
-
                 sens = np.multiply(np.asarray(sensitivityConstants[t]).transpose(), self.DActivationFn(self.activations[t])).transpose()
 
                 d=[]
@@ -266,7 +273,7 @@ class FeedForwardLayerRNN:
 
 
 class RecurrentForwardLayer:
-    def __init__(self, rng, nin, nout, activation=logistic, activation_prime=dlogistic, W=None, b=None, inputs=None, learningRate=.99):
+    def __init__(self, rng, nin, nout, activation=logistic, activation_prime=dlogistic, W=None, b=None, inputs=None, learningRate=.2):
         self.ActivationFn = np.frompyfunc(activation, 1, 1)
         self.DActivationFn = np.frompyfunc(activation_prime, 1, 1)
         self.inputs = []
@@ -280,9 +287,14 @@ class RecurrentForwardLayer:
         self.previousbDelta = None
 
         self.nout = nout
+        self.nin = nin
 
-        W = np.zeros((nin, nout))
-        if W is not None:
+        # This is the number of inputs that come from the layer below;
+        # ..excludes the number of inputs from previous timesteps
+        self.prev_layer_in = nin-nout
+
+        #W = np.zeros((nin, nout))
+        if W is None:
             self.W = np.asarray(
                 rng.uniform(
                     low=4 * np.sqrt(6.0 / (nin + nout)),     # generic range of values
@@ -334,8 +346,16 @@ class RecurrentForwardLayer:
             # Rationalization: the sensitivity constants are the dot product for all weights coming into the output layer
             # That means that only some of the sensitivity constants are applicable to the forward or backward layer
             # ...namely, the first half.
-            sens = np.multiply(np.asarray(sensitivityConstants[t][self.nout:]).transpose(), self.DActivationFn(self.activations[t])).transpose()
-            #sens = np.multiply(np.asarray(sensitivityConstants[t][:self.nout]).transpose(), self.DActivationFn(self.activations[t])).transpose()
+
+            # We don't have any sensitivity constants from this layer for a time step that is outside of the bounds
+            # So, we let the first set of sensitivity constants be the zero vector
+            # (or simply don't add anything to the sensitivity constants from the output layer)
+            if t==len(self.activations)-1:
+                sens = np.multiply(np.asarray(sensitivityConstants[t][:self.nout]).transpose(), self.DActivationFn(self.activations[t])).transpose()
+            else:
+                temp1 = np.asarray(sensitivityConstants[t][:self.nout]) + backwardSensConstants[-1][self.prev_layer_in:]
+                sens = np.multiply(np.asarray(temp1).transpose(), self.DActivationFn(self.activations[t])).transpose()
+
 
             d=[]
             for s in sens:
@@ -351,10 +371,10 @@ class RecurrentForwardLayer:
             wDeltas.append((-self.learningRate * gradient).reshape(self.W.shape))
             bDeltas.append((-self.learningRate * sens).reshape(self.b.shape))
 
-        # update batch weights
+        # update weights
         self.W += np.sum(wDeltas, axis=0)
         self.b += np.sum(bDeltas, axis=0)
-        return backwardSensConstants
+        return backwardSensConstants[::-1]
 
 
 class RecurrentBackwardLayer(RecurrentForwardLayer):
@@ -365,18 +385,24 @@ class RecurrentBackwardLayer(RecurrentForwardLayer):
         wDeltas = []
         bDeltas = []
 
-        for t in np.arange(len(self.activations)):
+        # Activations are in order or t=T-1....0
+        # We must loop over them backwards
+        # the Sensitivity Constants from the output layer are in order t=0....T-1, but are reversed before this call
+        for t in np.arange(len(self.activations)-1, -1, -1):
 
             # See RecurrentForwardLayer for an explanation of the slicing of the sensitivityConstants
-            sens = np.multiply(np.asarray(sensitivityConstants[t][:self.nout]).transpose(), self.DActivationFn(self.activations[t])).transpose()
-            #sens = np.multiply(np.asarray(sensitivityConstants[t][self.nout:]).transpose(), self.DActivationFn(self.activations[t])).transpose()
+            if t==len(self.activations)-1:
+                sens = np.multiply(np.asarray(sensitivityConstants[t][self.nout:]).transpose(), self.DActivationFn(self.activations[t])).transpose()
+            else:
+                temp1 = np.asarray(sensitivityConstants[t][self.nout:]) + backwardSensConstants[-1][self.prev_layer_in:]
+                sens = np.multiply(np.asarray(temp1).transpose(), self.DActivationFn(self.activations[t])).transpose()
 
             d=[]
             for s in sens:
                 for i in self.inputs[t]:
                     d.append(s*i)
             gradient = np.array(d).reshape(self.W.shape)
-            #gradient = sens * self.input
+            #gradient = sens * self.inputs
 
             # Calculate sensConstants before updating weights
             sensConstants = np.multiply(sens, self.W)
@@ -421,7 +447,7 @@ class BiDirectionalLayer:
                 [self.forward.predict(np.concatenate((win, self.forward.outputs[-1]), axis=0)) for win in windows],
                 # Backward pass over inputs and B(t+1)
                 # ...where B(t+1) corresponds to the last self.outputs
-                [self.backward.predict(np.concatenate((win, self.backward.outputs[-1]), axis=0)) for win in windows[::-1]]
+                [self.backward.predict(np.concatenate((win, self.backward.outputs[-1]), axis=0)) for win in windows[::-1]][::-1]
             ),
             axis=1
         )
@@ -429,9 +455,14 @@ class BiDirectionalLayer:
 
     def update(self, sensitivityConstants=None):
         # TODO: retrieve the sentitvity constants from the Bidirectional layer correctly
-        fs = [self.forward.update(sensitivityConstants)]
-        bs = [self.backward.update(sensitivityConstants)]
-        pass
+        fs = self.forward.update(sensitivityConstants)
+        bs = self.backward.update(sensitivityConstants[::-1])
+
+        senCat = np.column_stack((np.sum(fs, axis=1), np.sum(bs, axis=1)))
+
+        #print 'out of BDL:', np.shape(senCat)
+
+        return senCat
 
 
 class SoftmaxLayer:
@@ -441,16 +472,17 @@ class SoftmaxLayer:
 
     def predict_series(self, windows):
         self.inputs = windows
-        win_max = [(np.max(x), x) for x in windows]
-        out = [np.exp(x[1]-x[0]) for x in win_max]
+        #win_max = [(np.max(x), x) for x in windows]
+        out = [np.exp(x-np.max(x)) for x in windows]
         out = [x / np.sum(x) for x in out]
         self.outputs = out
+
         return out
 
 # TODO: Implement a non-recursive CTC algorithm
 # TODO: Implement the CTC algorithm in log-scale to prevent underflow; exponentiate only after the summation?
 class CTCLayer:
-    def __init__(self, alphabet=np.arange(28)):
+    def __init__(self, alphabet=np.arange(28), remove_duplicates=True):
         self.A = alphabet
         self.blank = len(alphabet)
         self.inputs = None
@@ -461,6 +493,8 @@ class CTCLayer:
 
         self.T = None
         self.U = None
+
+        self.remove_duplicates=remove_duplicates
 
     def recurrence_relationship(self, size):
         big_I = np.eye(size+2)
@@ -482,12 +516,18 @@ class CTCLayer:
         self.inputs = inputs
         self.T = len(inputs)
         self.sequence = sequence
-        self.sequence_prime = self.make_l_prime(self.F(sequence))
+        if self.remove_duplicates:
+            self.sequence_prime = self.make_l_prime(self.F(sequence))
+        else:
+            self.sequence_prime = self.make_l_prime(sequence)
         self.U = len(self.sequence_prime)
         self.matrixf = np.zeros((self.T, self.T))
         self.matrixb = np.zeros((self.T, self.T))
 
+
+
         fp = self.forward(self.T-1, self.U-1)
+        #print 'matf\n', self.matrixf, 'endmatf'
         self.matrixf = np.zeros((self.T, self.T))
         return fp + self.forward(self.T-1, self.U-2)
 
@@ -595,7 +635,7 @@ class CTCLayer:
 
 
 class BDRNN:
-    def __init__(self, defined_layers=None, window_width=0):
+    def __init__(self, defined_layers=None, window_width=0, learning_rate=.9, annealing_fn=lambda x: x):
         self.layers = defined_layers
         assert(self.layers is not None)
 
@@ -626,9 +666,10 @@ class BDRNN:
         y = self.predict(input_stream)      # output from the softmax layer
 
         aB = ctc_layer.alpha_beta(y, z)
-        p_z_x = ctc_layer.ctc(y, z)                     # TODO: ensure this is a correct approach, or use the summation
-        #p_z_x = (np.sum(aB[-1])/y[-1])[-1]
+        #p_z_x = ctc_layer.ctc(y, z)                     # TODO: ensure this is a correct approach, or use the summation
+        p_z_x = (np.sum(aB[-1]))   #/y[-1])[-1]
         z_prime = ctc_layer.make_l_prime(ctc_layer.F(z))
+        #print p_z_x
 
         # calculate the derivative of the loss with respect to the activations at the output
         K = []
@@ -644,14 +685,15 @@ class BDRNN:
                 for u in K[k]:
                     summation += aB[t][u]
 
-                sens_t.append(y[t][k] - (1.0/p_z_x)*summation)
+                sens_t.append(y[t][k] - summation/p_z_x)
+                #if p_z_x != 0.0:
+                #    sens_t.append(y[t][k] - summation/p_z_x)
+                #else: sens_t.append(summation)
             sensitivities.append(sens_t)
 
-        # TODO: Make this generic
-        sensitivities = self.layers[-2].update(sensitivityConstants=sensitivities)   # Output layer
-        sensitivities = self.layers[-3].update(sensitivityConstants=sensitivities)   # Bidirectional layer
-
-        #for i in len(self.layers)-2:
-        #    sensitivities = self.layers[i].update(sensitivityConstants=sensitivities)   # Output layer
+        #print sensitivities
+        # Backpropagate (through time)
+        for i in np.arange(len(self.layers)-2, -1, -1):
+            sensitivities = self.layers[i].update(sensitivityConstants=sensitivities)   # Output layer
 
         return p_z_x
