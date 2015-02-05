@@ -511,6 +511,46 @@ class CTCLayer:
         return result
         # return [blank] + sum([[i, blank] for i in l], [])
 
+
+    # This function acts as a sanity check:
+    #      P(sequence|inputs) = forward(T, U) + forward(T, U-1)
+    #      P(sequence|inputs) = forward(T, U)*backward(T, U)/inputs[T][U]
+    #
+    # therefore
+    #
+    #      forward(T, U) + forward(T, U-1) == forward(T, U)*backward(T, U)/inputs[T][U]
+    #
+    def ctc_check(self, inputs, sequence):
+        self.inputs = inputs
+        self.T = len(inputs)
+        self.sequence = sequence
+        if self.remove_duplicates:
+            self.sequence_prime = self.make_l_prime(self.F(sequence))
+        else:
+            self.sequence_prime = self.make_l_prime(sequence)
+        self.U = len(self.sequence_prime)
+        self.matrixf = np.zeros((self.T, self.T))
+        self.matrixb = np.zeros((self.T, self.T))
+
+        # forward(T, U)
+        self.calc_mat_f(self.T-1, self.U-1)
+        self.forward_wrapper()
+        fp1 = np.sum(self.matrixf[-1,:])
+
+        # forward(T, U-1)
+        self.matrixf = np.zeros((self.T, self.T))
+        self.calc_mat_f(self.T-1, self.U-2)
+        self.forward_wrapper()
+        fp2 = np.sum(self.matrixf[-1,:])
+
+        # backward(T, U)
+        self.calc_mat_b(self.T-1, self.U-1)
+        self.backward_wrapper()
+        bp1 = np.sum(self.matrixb[-1,:])
+
+        assert(fp1 * bp1 / self.inputs[-1][-1] == fp1 + fp2)
+
+
     # Calculate p(sequence|inputs)
     def ctc(self, inputs, sequence):
         self.inputs = inputs
@@ -525,23 +565,96 @@ class CTCLayer:
         self.matrixb = np.zeros((self.T, self.T))
 
 
+        self.calc_mat_f(self.T-1, self.U-1)     # Calculate the DP matrix of t,u values necessary into self.matrixf
+        self.forward_wrapper()                  # Overwrite self.matrixf with the forward computations
+        fp = np.sum(self.matrixf[-1,:])        # The sum of the bottom row is alpha(T, U)
 
-        fp = self.forward(self.T-1, self.U-1)
-        #print 'matf\n', self.matrixf, 'endmatf'
-        self.matrixf = np.zeros((self.T, self.T))
-        return fp + self.forward(self.T-1, self.U-2)
+        self.calc_mat_b(self.T-1, self.U-1)
+        self.forward_wrapper()
+        bp = np.sum(self.matrixb[-1.:])
 
-        summation = 0.0
-        for s in np.arange(self.U):
-            self.matrixf = np.zeros((self.T, self.T))
-            self.matrixb = np.zeros((self.T, self.T))
+        # return alpha(T, U) * beta(T, U) / inputs[T][U]
+        return fp * bp / inputs[-1][-1]
 
-            summation += self.forward(self.T-1, s) * self.backward(self.T-1, s) / y[self.T-1][self.sequence_prime[s]]
-        return fp
+    # Calculate the necessary forward probabilities iteratively
+    def forward_wrapper(self):
+        for t in np.arange(np.shape(self.matrixf)[0]):
+            for u in np.arange(np.shape(self.matrixf)[1]):
+                self.matrixf[t][u] = self.forward(t, u)
 
-    # DP (recursive) as described by the paper
-    def forward(self, t, u):
+    # Calculate the necessary backward probabilities iteratively
+    def backward_wrapper(self):
+        for t in np.arange(np.shape(self.matrixb)[0]-1, -1, -1):
+            for u in np.arange(np.shape(self.matrixb)[1]-1, -1, -1):
+                self.matrixb[t][u] = self.backward(t, u)
+
+
+    # Calculate a matrix that determines which pairs of (t, u) are required for the forward calculation
+    # This follows the recursive algorithm defined by the paper, but with a much lower cost per recursion level
+    # The actual probabilities at each t/u step will be calculated iteratively using this matrix as a guide
+    def calc_mat_f(self, t, u):
         if self.matrixf[t][u] != 0:
+            return
+        if t==0 and u==0:
+            self.matrixf[t][u] = 1
+            return
+        elif t==0 and u==1:
+            self.matrixf[t][u] = 1
+            return
+        elif t==0:
+            return
+        elif u<1 or u<(len(self.sequence_prime) - 2*(self.T-1 - t)-1):
+            return
+
+        if self.sequence_prime[u]==self.blank or self.sequence_prime[u-2]==self.sequence_prime[u]:
+            self.calc_mat_f(t-1, u)
+            self.calc_mat_f(t-1, u-1)
+            self.matrixf[t][u] = 1
+            return
+        else:
+            self.calc_mat_f(t-1, u)
+            self.calc_mat_f(t-1, u-1)
+            self.calc_mat_f(t-1, u-2)
+            self.matrixf[t][u] = 1
+            return
+
+    def calc_mat_b(self, t, u):
+        if self.matrixb[t][u] != 0:
+            return
+        if t==self.T-1 and u==len(self.sequence_prime)-1:
+            self.matrixb[t][u] = 1
+            return
+        elif t==self.T-1 and u==len(self.sequence_prime)-2:
+            self.matrixb[t][u] = 1
+            return
+        elif t==self.T-1:
+            return
+        elif u>2*t-1 or u>len(self.sequence_prime)-1:
+            return
+        if self.sequence_prime[u]==self.blank:
+            self.calc_mat_b(t+1, u)
+            self.calc_mat_b(t+1, u+1)
+            self.matrixb[t][u] = 1
+            return
+
+        # this is almost certainly incorrect, but there is an out-of-bounds error without it that I cannot track down
+        if u==len(self.sequence_prime)-2: return
+
+        elif self.sequence_prime[u+2]==self.sequence_prime[u]:
+            self.calc_mat_b(t+1, u)
+            self.calc_mat_b(t+1, u+1)
+            self.matrixb[t][u] = 1
+            return
+        else:
+            self.calc_mat_b(t+1, u)
+            self.calc_mat_b(t+1, u+1)
+            self.calc_mat_b(t+1, u+2)
+            self.matrixb[t][u] = 1
+            return
+
+    # Iterative approach to the forward algorithm
+    def forward(self, t, u):
+        if self.matrixf[t][u] != 1:
             return self.matrixf[t][u]
 
         if t==0 and u==0:
@@ -556,22 +669,23 @@ class CTCLayer:
         elif u<1 or u<(len(self.sequence_prime) - 2*(self.T-1 - t)-1): return 0
 
         if self.sequence_prime[u]==self.blank or self.sequence_prime[u-2]==self.sequence_prime[u]:
-            prob = (self.forward(t-1, u) +
-                    self.forward(t-1, u-1)) *\
+            prob = (self.matrixf[t-1][u] +
+                    self.matrixf[t-1][u-1]) *\
                     self.inputs[t][self.sequence_prime[u]]
             self.matrixf[t][u] = prob
             return prob
         else:
-            prob = (self.forward(t-1, u) +
-                    self.forward(t-1, u-1) +
-                    self.forward(t-1, u-2)) *\
+            prob = (self.matrixf[t-1][u] +
+                    self.matrixf[t-1][u-1] +
+                    self.matrixf[t-1][u-2]) *\
                     self.inputs[t][self.sequence_prime[u]]
             self.matrixf[t][u] = prob
             return prob
 
+    # Iterative approach to the backward algorithm
     def backward(self, t, u):
-        if self.matrixb[t][u] != 0:
-            self.matrixb[t][u]
+        if self.matrixb[t][u] != 1:
+            return self.matrixb[t][u]
 
         if t==self.T-1 and u==len(self.sequence_prime)-1:
             prob = self.inputs[self.T-1][self.blank]
@@ -587,8 +701,8 @@ class CTCLayer:
             return 0
 
         if self.sequence_prime[u]==self.blank:
-            prob = (self.backward(t+1, u) +
-                    self.backward(t+1, u+1)) *\
+            prob = (self.matrixb[t+1][u] +
+                    self.matrixb[t+1][u+1]) *\
                 self.inputs[t][self.sequence_prime[u]]
             self.matrixb[t][u] = prob
             return prob
@@ -597,15 +711,15 @@ class CTCLayer:
         if u==len(self.sequence_prime)-2: return 0
 
         elif self.sequence_prime[u+2]==self.sequence_prime[u]:
-            prob = (self.backward(t+1, u) +
-                    self.backward(t+1, u+1)) *\
+            prob = (self.matrixb[t+1][u] +
+                    self.matrixb[t+1][u+1]) *\
                 self.inputs[t][self.sequence_prime[u]]
             self.matrixb[t][u] = prob
             return prob
         else:
-            prob = (self.backward(t+1, u) +
-                    self.backward(t+1, u+1) +
-                    self.backward(t+1, u+2)) *\
+            prob = (self.matrixb[t+1][u] +
+                    self.matrixb[t+1][u+1] +
+                    self.matrixb[t+1][u+2]) *\
                 self.inputs[t][self.sequence_prime[u]]
             self.matrixb[t][u] = prob
             return prob
@@ -664,12 +778,15 @@ class BDRNN:
     # Train upon a single input sequence
     def train(self, input_stream, z, ctc_layer):
         y = self.predict(input_stream)      # output from the softmax layer
+        print 'predicted'
 
+        p_z_x = ctc_layer.ctc(y, z)                     # TODO: ensure this is a correct approach, or use the summation
         aB = ctc_layer.alpha_beta(y, z)
-        #p_z_x = ctc_layer.ctc(y, z)                     # TODO: ensure this is a correct approach, or use the summation
-        p_z_x = (np.sum(aB[-1]))   #/y[-1])[-1]
+        #p_z_x = (np.sum(aB[-1]))   #/y[-1])[-1]
         z_prime = ctc_layer.make_l_prime(ctc_layer.F(z))
-        #print p_z_x
+        print p_z_x
+
+        print aB
 
         # calculate the derivative of the loss with respect to the activations at the output
         K = []
