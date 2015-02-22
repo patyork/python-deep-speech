@@ -13,6 +13,8 @@ from theano_toolkit import utils as U
 from theano_toolkit import updates
 import numpy as np
 
+#THEANO_FLAGS='device=cpu,floatX=float32'
+theano.config.warn_float64='warn'
 
 #theano.config.optimizer = 'fast_compile'
 theano.config.exception_verbosity='high'
@@ -24,7 +26,6 @@ def clipped_relu(x): return np.min(np.max(0, x), 20)
 
 class FeedForwardLayer:
     def __init__(self, inputs, input_size, output_size):
-
         self.activation_fn = lambda x: T.minimum(x * (x > 0), 20)
 
         W = U.create_shared(U.initial_weights(input_size, output_size))
@@ -73,6 +74,7 @@ class SoftmaxLayer:
         self.output = T.nnet.softmax(T.dot(inputs, W) + b)
         self.params = [W, b]
 
+
 # Courtesy of https://github.com/rakeshvar/rnn_ctc
 class CTCLayer():
     def __init__(self, inpt, labels, blank):
@@ -87,15 +89,18 @@ class CTCLayer():
             b) the next to next label is different from the current
             (Second upper diagonal is product of conditons a & b)
         '''
-        labels2 = T.concatenate((labels, [blank, blank]))
-        sec_diag = T.neq(labels2[:-2], labels2[2:]) * T.eq(labels2[1:-1], blank)
+        #labels2 = T.concatenate((labels, [blank, blank]))
+        #sec_diag = T.neq(labels2[:-2], labels2[2:]) * T.eq(labels2[1:-1], blank)
         n_labels = labels.shape[0]
 
-        recurrence_relation = \
-               T.eye(n_labels) + \
-               T.eye(n_labels, k=1) + \
-               T.eye(n_labels, k=2) * sec_diag.dimshuffle((0, 'x'))
-
+        #recurrence_relation = \
+        #       T.eye(n_labels) + \
+        #       T.eye(n_labels, k=1) + \
+        #       T.eye(n_labels, k=2) * sec_diag.dimshuffle((0, 'x'))
+        
+        big_I = T.cast(T.eye(n_labels+2), 'float32')
+        recurrence_relation = T.cast(T.eye(n_labels), 'float32') + big_I[2:,1:-1] + big_I[2:,:-2] * T.cast((T.arange(n_labels) % 2), 'float32')
+        recurrence_relation = T.cast(recurrence_relation, 'float32')
         '''
         Forward path probabilities
         '''
@@ -104,7 +109,7 @@ class CTCLayer():
         probabilities, _ = theano.scan(
             lambda curr, prev: curr * T.dot(prev, recurrence_relation),
             sequences=[pred_y],
-            outputs_info=[T.eye(n_labels)[0]]
+            outputs_info=[T.cast(T.eye(n_labels)[0], 'float32')]
         )
 
 

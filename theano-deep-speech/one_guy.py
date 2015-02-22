@@ -9,6 +9,8 @@ import cPickle as pickle
 
 import brnn as nn
 
+#THEANO_FLAGS='device=cpu,floatX=float32'
+
 
 def str_to_seq(str):
     seq = []
@@ -62,7 +64,7 @@ import os
 samples = []
 directory = 'pickled'
 files = [os.path.join(directory, x) for x in os.listdir(directory)]
-files = files[:10]
+files = files[:25]
 
 if DEBUG:
     #files = files[:30]
@@ -80,11 +82,18 @@ for f in files:
         label_len = len(sample[0])
         label_prime_len = len(make_l_prime(str_to_seq(F(sample[0], len(alphabet))), len(alphabet)))
         num_buckets = np.shape(sample[1])[0]
-        if 10 < label_len < 45 and label_prime_len <= num_buckets:# and (float(num_buckets) / float(label_prime_len) < 3.0):
+        if label_len < 30 and label_prime_len <= num_buckets:# and (float(num_buckets) / float(label_prime_len) < 3.0):
             samples.append(sample)
 
-#samples = samples[:1]
 
+
+
+print type(samples[0][1])
+print samples[0][1].dtype
+print samples[0][1][0].dtype
+
+
+#network = nn.BRNN(np.shape(samples[0][1])[1], len(alphabet)+1)        #x3 for the window
 network = nn.BRNN(np.shape(samples[0][1])[1]*3, len(alphabet)+1)        #x3 for the window
 
 print 'built network - num samples:', len(samples)
@@ -100,8 +109,9 @@ for s in samples:
     windowed = []
     for i in np.arange(window_size, len(s[1])-window_size):
         windowed.append(np.concatenate((s[1][i-1], s[1][i], s[1][i+1])))
-
+    
     windowed = np.asarray(windowed)
+    #windowed = s[1]
 
     cst = network.validator(windowed, label_prime)[0]
 
@@ -112,6 +122,8 @@ for s in samples:
 
 for ndx in bad[::-1]:
     del samples[ndx]
+    
+#samples = samples[:50]
 
 print 'Samples after inf test:', len(samples)
 
@@ -127,8 +139,9 @@ if DEBUG:
         windowed = []
         for i in np.arange(window_size, len(s[1])-window_size):
             windowed.append(np.concatenate((s[1][i-1], s[1][i], s[1][i+1])))
-
+        
         windowed = np.asarray(windowed)
+        #windowed = s[1]
 
 
         if not len(label_prime) > np.shape(s[1])[0]:
@@ -230,8 +243,9 @@ try:
             windowed = []
             for i in np.arange(window_size, len(s[1])-window_size):
                 windowed.append(np.concatenate((s[1][i-1], s[1][i], s[1][i+1])))
-
+            
             windowed = np.asarray(windowed)
+            #windowed = s[1]
 
             cst, pred = network.trainer(windowed, label_prime)
             avg_error += cst
@@ -246,7 +260,7 @@ try:
 
         print 'Epoch:', epoch, '\t', avg_error / len(samples), str(time.time()-duration)+'s', '\t' + str(len(samples)), 'samples'
 
-        if epoch % 1 == 0:
+        if epoch % 10 == 0:
             # Window and send
             window_size = 1 # 1 frame of context on each side
             windowed = []
@@ -254,6 +268,7 @@ try:
                 windowed.append(np.concatenate((visual_sample[1][i-1], visual_sample[1][i], visual_sample[1][i+1])))
 
             windowed = np.asarray(windowed)
+            #windowed = visual_sample[1]
 
             pred = network.tester(windowed)[0]
 
@@ -300,8 +315,9 @@ except KeyboardInterrupt:
         windowed = []
         for i in np.arange(window_size, len(s[1])-window_size):
             windowed.append(np.concatenate((s[1][i-1], s[1][i], s[1][i+1])))
-
+        
         windowed = np.asarray(windowed)
+        #windowed=s[1]
 
         print s[0], '||', seq_to_str([np.argmax(x) for x in network.tester(windowed)[0]])
 
