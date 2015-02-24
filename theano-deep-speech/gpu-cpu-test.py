@@ -135,11 +135,12 @@ rng = np.random.RandomState(1234)
 try:
     for epoch in np.arange(1):
         error = 0.0
+        duration = time.time()
         for minibatch_index in np.arange(minibatches):
             cst, pred = network.trainer(minibatch_index)
             error += cst
 
-        print 'Epoch %i:\tAverage Error: %f' % (epoch, error/minibatches)
+        print 'Epoch %i:\tAverage Error: %f\tDuration: %f' % (epoch, error/minibatches, time.time()-duration)
 
 except KeyboardInterrupt:
     for s in samples:
