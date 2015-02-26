@@ -64,7 +64,7 @@ import os
 samples = []
 directory = 'pickled'
 files = [os.path.join(directory, x) for x in os.listdir(directory)]
-files = files[:25]
+files = files[:100]
 
 
 for f in files:
@@ -77,7 +77,6 @@ for f in files:
         num_buckets = np.shape(sample[1])[0]
         if label_len < 30 and label_prime_len <= num_buckets:# and (float(num_buckets) / float(label_prime_len) < 3.0):
             samples.append(sample)
-
 
 
 def generate_shared(samples, blank):
@@ -114,19 +113,26 @@ def generate_shared(samples, blank):
     shared_x_data = theano.shared(x_data, borrow=True)
     shared_y_data = theano.shared(np.asarray(y_data), borrow=True)
 
-    return shared_x_data, shared_y_data
+    return shared_x_data, theano.tensor.cast(shared_y_data, 'int32')
 
 
 shared_x, shared_y = generate_shared(samples, len(alphabet))
-
-print shared_x.dtype
-print shared_y.dtype
-
 
 
 #network = nn.BRNN(np.shape(samples[0][1])[1], len(alphabet)+1)        #x3 for the window
 network = nn.BRNN(240, len(alphabet)+1, shared_x, shared_y)        #x3 for the window
 print 'built network - num samples:', len(samples)
+
+
+for asfdasdf in np.arange(5):
+    for ndexx in np.arange(9):
+        duration = time.time()
+        sOut = network.debug(ndexx)
+
+        print 'Shape: ', sOut[0].shape, '\tValue: ', sOut, '\tDuration: %f' % (time.time()-duration)
+    print '\n\n'
+
+raw_input()
 
 
 minibatches = len(samples)

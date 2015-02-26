@@ -16,7 +16,7 @@ import numpy as np
 #THEANO_FLAGS='device=cpu,floatX=float32'
 theano.config.warn_float64='ignore'
 
-#theano.config.optimizer = 'fast_compile'
+theano.config.optimizer = 'fast_compile'
 theano.config.exception_verbosity='high'
 
 
@@ -55,7 +55,7 @@ class RecurrentLayer:
             go_backwards=is_backward
         )
 
-        self.params = [W_if, W_ff, b, initial]
+        self.params = [W_if, W_ff, b]
 
 class SoftmaxLayer:
     def __init__(self, inputs, input_size, output_size):
@@ -81,43 +81,60 @@ class CTCLayer():
             b) the next to next label is different from the current
             (Second upper diagonal is product of conditons a & b)
         '''
-        n_labels = labels.shape[0]
-
+        n_labels = 59#labels[0].shape[0]
         big_I = T.cast(T.eye(n_labels+2), 'float64')
         recurrence_relation = T.cast(T.eye(n_labels), 'float64') + big_I[2:,1:-1] + big_I[2:,:-2] * T.cast((T.arange(n_labels) % 2), 'float64')
         recurrence_relation = T.cast(recurrence_relation, 'float64')
 
-        '''
-        Forward path probabilities
-        '''
-        pred_y = inpt[:, labels]
+        #inpt = T.reshape(inpt, (2, 209, blank+1))
 
-        probabilities, _ = theano.scan(
-            lambda curr, prev: curr * T.dot(prev, recurrence_relation),
-            sequences=[pred_y],
-            outputs_info=[T.cast(T.eye(n_labels)[0], 'float64')]
+
+
+        inpt = T.reshape(inpt, (10, 236, 30))
+
+        def step(input, label):
+            '''
+            Forward path probabilities
+            '''
+            pred_y = input[:, label]
+
+            probabilities, _ = theano.scan(
+                lambda curr, prev: curr * T.dot(prev, recurrence_relation),
+                sequences=[pred_y],
+                outputs_info=[T.cast(T.eye(n_labels)[0], 'float64')]
+            )
+            return -T.log(T.sum(probabilities[-1, -2:]))
+
+        probs, _ = theano.scan(
+            step,
+            sequences=[inpt, labels]
         )
 
+        self.cost = T.mean(probs)
+
+
+
         # Final Costs
-        labels_probab = T.sum(probabilities[-1, -2:])
-        self.cost = -T.log(labels_probab)
+        #labels_probab = T.sum(probabilities[-1, -2:])
+        #self.cost = -T.log(labels_probab)
         self.params = []
-        self.debug = probabilities.T
+        #self.debug = probabilities.T
 
 
 class BRNN:
-    def __init__(self, input_dimensionality, output_dimensionality, data_x, data_y, batch_size=1, learning_rate=0.01, momentum=.25):
-        input = T.fmatrix('input_seq')
-        label = T.ivector('label')
+    def __init__(self, input_dimensionality, output_dimensionality, data_x, data_y, batch_size=10, learning_rate=0.01, momentum=.25):
+        input_stack = T.fmatrix('input_seq')
+        # label = T.ivector('label')
+        label_stack = T.imatrix('label')
         index = T.iscalar()  # index to the sample
 
-        ff1 = FeedForwardLayer(input, input_dimensionality, 200)
+        ff1 = FeedForwardLayer(input_stack, input_dimensionality, 200)
         ff2 = FeedForwardLayer(ff1.output, 200, 100)
         ff3 = FeedForwardLayer(ff2.output, 100, 50)
         rf = RecurrentLayer(ff3.output, 50, 25, False)     # Forward layer
         rb = RecurrentLayer(ff3.output, 50, 25, True)      # Backward layer
         s = SoftmaxLayer(T.concatenate((rf.output, rb.output), axis=1), 2*25, output_dimensionality)
-        ctc = CTCLayer(s.output, label, output_dimensionality-1)
+        ctc = CTCLayer(s.output, label_stack, output_dimensionality-1)
 
         updates = []
         for layer in (ff1, ff2, ff3, rf, rb, s):
@@ -127,22 +144,45 @@ class BRNN:
                 updates.append((p, p - learning_rate * param_update))
                 updates.append((param_update, momentum * param_update + (1. - momentum) * grad))
 
+        '''
         self.trainer = theano.function(
             inputs=[index],
+            #outputs=[s.output],
             outputs=[ctc.cost, s.output],
             updates=updates,
             givens={
-                input: data_x[index],
-                label: data_y[index]
+                input_stack: data_x[index*batch_size:(index+1)*batch_size].reshape((209*batch_size, 240)),
+                label_stack: data_y[index*batch_size:(index+1)*batch_size]
+                #label: data_y[index]
             }
         )
 
+
         self.validator = theano.function(
-            inputs=[input, label],
-            outputs=[ctc.cost]
+            inputs=[input_stack, label_stack],
+            #outputs=[ctc.cost]
         )
 
+
         self.tester = theano.function(
-            inputs=[input],
+            inputs=[input_stack],
             outputs=[s.output]
+        )
+        '''
+        self.debug = theano.function(
+            inputs=[index],
+            outputs=[ctc.cost],
+            updates=updates,
+            givens={
+                input_stack: data_x[index*batch_size:(index+1)*batch_size].reshape((236*batch_size, 240)),
+                label_stack: data_y[index*batch_size:(index+1)*batch_size]
+            }
+        )
+        self.debugTest = theano.function(
+            inputs=[index],
+            outputs=[s.output],
+            givens={
+                input_stack: data_x[index*batch_size:(index+1)*batch_size].reshape((236*batch_size, 240)),
+                label_stack: data_y[index*batch_size:(index+1)*batch_size]
+            }
         )
