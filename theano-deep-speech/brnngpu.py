@@ -14,9 +14,9 @@ from theano_toolkit import updates
 import numpy as np
 
 #THEANO_FLAGS='device=cpu,floatX=float32'
-theano.config.warn_float64='ignore'
+#theano.config.warn_float64='warn'
 
-theano.config.optimizer = 'fast_compile'
+#theano.config.optimizer = 'fast_compile'
 theano.config.exception_verbosity='high'
 
 
@@ -81,16 +81,13 @@ class CTCLayer():
             b) the next to next label is different from the current
             (Second upper diagonal is product of conditons a & b)
         '''
-        n_labels = 59#labels[0].shape[0]
+        n_labels = 79#labels[0].shape[0]
         big_I = T.cast(T.eye(n_labels+2), 'float64')
         recurrence_relation = T.cast(T.eye(n_labels), 'float64') + big_I[2:,1:-1] + big_I[2:,:-2] * T.cast((T.arange(n_labels) % 2), 'float64')
         recurrence_relation = T.cast(recurrence_relation, 'float64')
 
-        #inpt = T.reshape(inpt, (2, 209, blank+1))
 
-
-
-        inpt = T.reshape(inpt, (10, 236, 30))
+        inpt = T.reshape(inpt, (1000, 291, 30))
 
         def step(input, label):
             '''
@@ -111,18 +108,11 @@ class CTCLayer():
         )
 
         self.cost = T.mean(probs)
-
-
-
-        # Final Costs
-        #labels_probab = T.sum(probabilities[-1, -2:])
-        #self.cost = -T.log(labels_probab)
         self.params = []
-        #self.debug = probabilities.T
 
 
 class BRNN:
-    def __init__(self, input_dimensionality, output_dimensionality, data_x, data_y, batch_size=10, learning_rate=0.01, momentum=.25):
+    def __init__(self, input_dimensionality, output_dimensionality, data_x, data_y, batch_size=1000, learning_rate=0.01, momentum=.25):
         input_stack = T.fmatrix('input_seq')
         # label = T.ivector('label')
         label_stack = T.imatrix('label')
@@ -135,8 +125,8 @@ class BRNN:
         rb = RecurrentLayer(ff3.output, 50, 25, True)      # Backward layer
         s = SoftmaxLayer(T.concatenate((rf.output, rb.output), axis=1), 2*25, output_dimensionality)
         ctc = CTCLayer(s.output, label_stack, output_dimensionality-1)
-
-        updates = []
+        
+        '''updates = []
         for layer in (ff1, ff2, ff3, rf, rb, s):
             for p in layer.params:
                 param_update = theano.shared(p.get_value()*0., broadcastable=p.broadcastable)
@@ -144,7 +134,7 @@ class BRNN:
                 updates.append((p, p - learning_rate * param_update))
                 updates.append((param_update, momentum * param_update + (1. - momentum) * grad))
 
-        '''
+        ''''''
         self.trainer = theano.function(
             inputs=[index],
             #outputs=[s.output],
@@ -172,9 +162,9 @@ class BRNN:
         self.debug = theano.function(
             inputs=[index],
             outputs=[ctc.cost],
-            updates=updates,
+            #updates=updates,
             givens={
-                input_stack: data_x[index*batch_size:(index+1)*batch_size].reshape((236*batch_size, 240)),
+                input_stack: data_x[index*batch_size:(index+1)*batch_size].reshape((291*batch_size, 240)),
                 label_stack: data_y[index*batch_size:(index+1)*batch_size]
             }
         )
@@ -182,7 +172,7 @@ class BRNN:
             inputs=[index],
             outputs=[s.output],
             givens={
-                input_stack: data_x[index*batch_size:(index+1)*batch_size].reshape((236*batch_size, 240)),
-                label_stack: data_y[index*batch_size:(index+1)*batch_size]
+                input_stack: data_x[index*batch_size:(index+1)*batch_size].reshape((291*batch_size, 240)),
+                #label_stack: data_y[index*batch_size:(index+1)*batch_size]
             }
         )

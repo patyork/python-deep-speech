@@ -64,7 +64,7 @@ import os
 samples = []
 directory = 'pickled'
 files = [os.path.join(directory, x) for x in os.listdir(directory)]
-files = files[:100]
+files = files[:350]
 
 
 for f in files:
@@ -75,7 +75,7 @@ for f in files:
         label_len = len(sample[0])
         label_prime_len = len(make_l_prime(str_to_seq(F(sample[0], len(alphabet))), len(alphabet)))
         num_buckets = np.shape(sample[1])[0]
-        if label_len < 30 and label_prime_len <= num_buckets:# and (float(num_buckets) / float(label_prime_len) < 3.0):
+        if label_len < 37 and label_prime_len <= num_buckets:# and (float(num_buckets) / float(label_prime_len) < 3.0):
             samples.append(sample)
 
 
@@ -120,12 +120,13 @@ shared_x, shared_y = generate_shared(samples, len(alphabet))
 
 
 #network = nn.BRNN(np.shape(samples[0][1])[1], len(alphabet)+1)        #x3 for the window
+duration = time.time()
 network = nn.BRNN(240, len(alphabet)+1, shared_x, shared_y)        #x3 for the window
-print 'built network - num samples:', len(samples)
+print 'built network - num samples:', len(samples), '\tBuild Time: %fs' % (time.time()-duration)
 
 
 for asfdasdf in np.arange(5):
-    for ndexx in np.arange(9):
+    for ndexx in np.arange(math.floor(1001/1000)):
         duration = time.time()
         sOut = network.debug(ndexx)
 
