@@ -124,6 +124,25 @@ duration = time.time()
 network = nn.BRNN(240, len(alphabet)+1, shared_x, shared_y)        #x3 for the window
 print 'built network - num samples:', len(samples), '\tBuild Time: %fs' % (time.time()-duration)
 
+network.dump('test.pkl')
+
+sOut1 = network.debugTest(0)
+print 'Shape: ', sOut1[0].shape, '\tValue: ', sOut1, '\tDuration: %f' % (time.time()-duration)
+sOut2 = network.debugTest(0)
+print 'Shape: ', sOut2[0].shape, '\tValue: ', sOut2, '\tDuration: %f' % (time.time()-duration)
+
+#network = None
+network.load('test.pkl')
+sOut3 = network.debugTest(0)
+print 'Shape: ', sOut3[0].shape, '\tValue: ', sOut3, '\tDuration: %f' % (time.time()-duration)
+sOut4 = network.debugTest(0)
+print 'Shape: ', sOut4[0].shape, '\tValue: ', sOut4, '\tDuration: %f' % (time.time()-duration)
+
+print '\n\nDifference:\n'
+print np.sum(sOut3-sOut1)
+print np.sum(sOut4-sOut2)
+
+raw_input()
 
 for asfdasdf in np.arange(5):
     for ndexx in np.arange(math.floor(1001/1000)):

@@ -210,3 +210,23 @@ class BRNN:
                 #label_stack: data_y[index*batch_size:(index+1)*batch_size]
             }
         )
+
+    def dump(self, f_path):
+        f = file(f_path, 'wb')
+        for obj in [self.ff1, self.ff2, self.ff3, self.rf, self.rb, self.s]:
+            pickle.dump(obj, f, protocol=pickle.HIGHEST_PROTOCOL)
+        f.close()
+
+    def load(self, f_path):
+        f = file(f_path, 'rb')
+        loaded = []
+        for i in np.arange(6):
+            loaded.append(pickle.load(f))
+        f.close()
+
+        self.ff1 = loaded[0]
+        self.ff2 = loaded[1]
+        self.ff3 = loaded[2]
+        self.rf = loaded[3]
+        self.rb = loaded[4]
+        self.s = loaded[5]
