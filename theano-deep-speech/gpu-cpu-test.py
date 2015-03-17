@@ -8,6 +8,7 @@ from matplotlib.lines import Line2D
 import cPickle as pickle
 import brnngpu as nn
 import theano
+import os
 
 #THEANO_FLAGS='device=cpu,floatX=float32'
 
@@ -58,27 +59,6 @@ def make_l_prime(l, blank):
 
 alphabet = np.arange(29) #[a,....,z, space, ', -]
 
-
-# Load samples
-import os
-samples = []
-directory = 'pickled'
-files = [os.path.join(directory, x) for x in os.listdir(directory)]
-files = files[:100]
-
-
-for f in files:
-    submission = pickle.load(open(f, 'rb'))
-    print f
-
-    for sample in submission:
-        label_len = len(sample[0])
-        label_prime_len = len(make_l_prime(str_to_seq(F(sample[0], len(alphabet))), len(alphabet)))
-        num_buckets = np.shape(sample[1])[0]
-        if label_len < 37 and label_prime_len <= num_buckets:# and (float(num_buckets) / float(label_prime_len) < 3.0):
-            samples.append(sample)
-
-
 def generate_shared(samples, blank):
     maximum_x = np.max([s[1].shape[0] for s in samples])
     maximum_y = np.max([len(s[0]) for s in samples])*2+1
@@ -113,57 +93,58 @@ def generate_shared(samples, blank):
     shared_x_data = theano.shared(x_data, borrow=True)
     shared_y_data = theano.shared(np.asarray(y_data), borrow=True)
 
-    return shared_x_data, theano.tensor.cast(shared_y_data, 'int32')
+    return shared_x_data, theano.tensor.cast(shared_y_data, 'int32'), x_data.shape[1]
 
 
-shared_x, shared_y = generate_shared(samples, len(alphabet))
+# Load samples
+samples = []
+directory = 'pickled'
+files = [os.path.join(directory, x) for x in os.listdir(directory)]
+files = files[:100]
 
-#raw_input()
 
+for f in files:
+    submission = pickle.load(open(f, 'rb'))
+    print f
+
+    for sample in submission:
+        label_len = len(sample[0])
+        label_prime_len = len(make_l_prime(str_to_seq(F(sample[0], len(alphabet))), len(alphabet)))
+        num_buckets = np.shape(sample[1])[0]
+        if label_len < 37 and label_prime_len <= num_buckets:# and (float(num_buckets) / float(label_prime_len) < 3.0):
+            samples.append(sample)
+
+# Create shared
+shared_x, shared_y, max_length = generate_shared(samples, len(alphabet))
+
+# Parameters
+batchSize = 100
+numBatchesPerEpoch = int(len(samples)/batchSize)
+rng = np.random.RandomState(1234)
 
 #network = nn.BRNN(np.shape(samples[0][1])[1], len(alphabet)+1)        #x3 for the window
 duration = time.time()
-network = nn.BRNN(240, len(alphabet)+1, shared_x, shared_y)        #x3 for the window
+net = nn.Network()
+network = net.create_network(240, len(alphabet)+1, shared_x, shared_y, max_length, batch_size=batchSize)        #x3 for the window
 print 'built network - num samples:', len(samples), '\tBuild Time: %fs' % (time.time()-duration)
 
-duration = time.time()
-network.dump('test.pkl')
-print 'dumped in', time.time()-duration
 
-duration = time.time()
-sOut1 = network.debugTest(0)
-print 'Shape: ', sOut1[0].shape, '\tValue: ', sOut1, '\tDuration: %f' % (time.time()-duration)
-duration = time.time()
-sOut2 = network.debugTest(1)
-print 'Shape: ', sOut2[0].shape, '\tValue: ', sOut2, '\tDuration: %f' % (time.time()-duration)
+for epoch in np.arange(10000):
+    randomShuffle = np.arange(numBatchesPerEpoch)
+    rng.shuffle(randomShuffle)
 
-#network = None
-duration = time.time()
-network.load('test.pkl')
-duration = time.time()
-
-print 'loaded in', time.time()-duration
-duration = time.time()
-sOut3 = network.debugTest(0)
-print 'Shape: ', sOut3[0].shape, '\tValue: ', sOut3, '\tDuration: %f' % (time.time()-duration)
-duration = time.time()
-sOut4 = network.debugTest(1)
-print 'Shape: ', sOut4[0].shape, '\tValue: ', sOut4, '\tDuration: %f' % (time.time()-duration)
-
-print '\n\nDifference:\n'
-print np.sum(sOut3[0]-sOut1[0])
-print np.sum(sOut4[0]-sOut2[0])
-
-raw_input()
-
-for asfdasdf in np.arange(5):
-    for ndexx in np.arange(math.floor(1001/1000)):
+    duration = time.time()
+    for ndexx in randomShuffle:
         duration = time.time()
-        sOut = network.debugTest(ndexx)
+        sOut = network.trainer(ndexx)
+    print 'epoch', epoch, '\tDuration: %f' % (time.time()-duration)
 
-        print 'Shape: ', sOut[0].shape, '\tValue: ', sOut, '\tDuration: %f' % (time.time()-duration)
-    print '\n\n'
 
+    if epoch +1 % 25 == 0:
+        net.dump_network('epoch_'+epoch+'.pkl')
+
+
+'''
 raw_input()
 
 
@@ -194,3 +175,4 @@ except KeyboardInterrupt:
         print s[0], '||', seq_to_str([np.argmax(x) for x in network.tester(windowed)[0]])
 
 raw_input('asdgf')
+'''
