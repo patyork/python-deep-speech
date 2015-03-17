@@ -64,7 +64,7 @@ import os
 samples = []
 directory = 'pickled'
 files = [os.path.join(directory, x) for x in os.listdir(directory)]
-files = files[:350]
+files = files[:100]
 
 
 for f in files:
@@ -128,7 +128,7 @@ print 'built network - num samples:', len(samples), '\tBuild Time: %fs' % (time.
 for asfdasdf in np.arange(5):
     for ndexx in np.arange(math.floor(1001/1000)):
         duration = time.time()
-        sOut = network.debug(ndexx)
+        sOut = network.debugTest(ndexx)
 
         print 'Shape: ', sOut[0].shape, '\tValue: ', sOut, '\tDuration: %f' % (time.time()-duration)
     print '\n\n'
