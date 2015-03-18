@@ -25,24 +25,23 @@ class FeedForwardLayer:
     def __init__(self, inputs, input_size, output_size):
         self.activation_fn = lambda x: T.minimum(x * (x > 0), 20)
 
-        self.W = U.create_shared(U.initial_weights(input_size, output_size))
-        self.b = U.create_shared(U.initial_weights(output_size))
+        W = U.create_shared(U.initial_weights(input_size, output_size))
+        b = U.create_shared(U.initial_weights(output_size))
 
         self.output, _ = theano.scan(
-            lambda element: self.activation_fn(T.dot(element, self.W) + self.b),
+            lambda element: self.activation_fn(T.dot(element, W) + b),
             sequences=[inputs]
         )
 
-        self.params = [self.W, self.b]
+        self.params = [W, b]
 
     def __getstate__(self):
-        return (self.W, self.b, self.activation_fn)
+        return (self.W.get_value(), self.b.get_value())
 
     def __setstate__(self, state):
-        W, b, fn = state
-        self.W = W
-        self.b = b
-        self.activation_fn = fn
+        #W, b = state
+        self.W.set_value(state[0])
+        self.b.set_value(state[1])
 
 
 
@@ -69,15 +68,14 @@ class RecurrentLayer:
         self.params = [self.W_if, self.W_ff, self.b]
 
     def __getstate__(self):
-        return (self.W_if, self.W_ff, self.b, self.initial, self.activation_fn, self.is_backward)
+        return (self.W_if.get_value(), self.W_ff.get_value(), self.b.get_value(), self.initial.get_value(), self.is_backward)
 
     def __setstate__(self, state):
-        W_if, W_ff, b, initial, fn, is_back = state
-        self.W_if = W_if
-        self.W_ff = W_ff
-        self.b = b
-        self.initial = initial
-        self.activation_fn = fn
+        W_if, W_ff, b, initial, is_back = state
+        self.W_if.set_value(W_if)
+        self.W_ff.set_value(W_ff)
+        self.b.set_value(b)
+        self.initial.set_value(initial)
         self.is_backward = is_back
 
 class SoftmaxLayer:
@@ -89,13 +87,12 @@ class SoftmaxLayer:
         self.params = [self.W, self.b]
 
     def __getstate__(self):
-        return (self.W, self.b, self.activation_fn)
+        return (self.W.get_value(), self.b.get_value())
 
     def __setstate__(self, state):
-        W, b, fn = state
-        self.W = W
-        self.b = b
-        self.activation_fn = fn
+        W, b = state
+        self.W.set_value(W)
+        self.b.set_value(b)
 
 
 # Courtesy of https://github.com/rakeshvar/rnn_ctc
@@ -192,21 +189,22 @@ class BRNN:
             inputs=[input_stack],
             outputs=[s.output]
         )
+        
         '''
-        '''self.debug = theano.function(
+        self.debug = theano.function(
             inputs=[index],
             outputs=[ctc.cost],
             #updates=updates,
             givens={
-                input_stack: data_x[index*batch_size:(index+1)*batch_size].reshape((281*batch_size, 240)),
+                input_stack: data_x[index*batch_size:(index+1)*batch_size].reshape((256*batch_size, 240)),
                 label_stack: data_y[index*batch_size:(index+1)*batch_size]
             }
-        )'''
+        )
         self.debugTest = theano.function(
             inputs=[index],
-            outputs=[self.ctc.output],
+            outputs=[self.s.output],
             givens={
-                input_stack: data_x[index*batch_size:(index+1)*batch_size].reshape((281*batch_size, 240)),
+                input_stack: data_x[index*batch_size:(index+1)*batch_size].reshape((256*batch_size, 240)),
                 #label_stack: data_y[index*batch_size:(index+1)*batch_size]
             }
         )
@@ -224,7 +222,7 @@ class BRNN:
             loaded.append(pickle.load(f))
         f.close()
 
-        self.ff1 = loaded[0]
+        self.ff1v = loaded[0]
         self.ff2 = loaded[1]
         self.ff3 = loaded[2]
         self.rf = loaded[3]

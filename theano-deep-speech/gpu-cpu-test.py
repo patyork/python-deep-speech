@@ -118,29 +118,41 @@ def generate_shared(samples, blank):
 
 shared_x, shared_y = generate_shared(samples, len(alphabet))
 
+#raw_input()
+
 
 #network = nn.BRNN(np.shape(samples[0][1])[1], len(alphabet)+1)        #x3 for the window
 duration = time.time()
 network = nn.BRNN(240, len(alphabet)+1, shared_x, shared_y)        #x3 for the window
 print 'built network - num samples:', len(samples), '\tBuild Time: %fs' % (time.time()-duration)
 
+duration = time.time()
 network.dump('test.pkl')
+print 'dumped in', time.time()-duration
 
+duration = time.time()
 sOut1 = network.debugTest(0)
 print 'Shape: ', sOut1[0].shape, '\tValue: ', sOut1, '\tDuration: %f' % (time.time()-duration)
-sOut2 = network.debugTest(0)
+duration = time.time()
+sOut2 = network.debugTest(1)
 print 'Shape: ', sOut2[0].shape, '\tValue: ', sOut2, '\tDuration: %f' % (time.time()-duration)
 
 #network = None
+duration = time.time()
 network.load('test.pkl')
+duration = time.time()
+
+print 'loaded in', time.time()-duration
+duration = time.time()
 sOut3 = network.debugTest(0)
 print 'Shape: ', sOut3[0].shape, '\tValue: ', sOut3, '\tDuration: %f' % (time.time()-duration)
-sOut4 = network.debugTest(0)
+duration = time.time()
+sOut4 = network.debugTest(1)
 print 'Shape: ', sOut4[0].shape, '\tValue: ', sOut4, '\tDuration: %f' % (time.time()-duration)
 
 print '\n\nDifference:\n'
-print np.sum(sOut3-sOut1)
-print np.sum(sOut4-sOut2)
+print np.sum(sOut3[0]-sOut1[0])
+print np.sum(sOut4[0]-sOut2[0])
 
 raw_input()
 
