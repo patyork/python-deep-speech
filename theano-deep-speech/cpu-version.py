@@ -89,8 +89,10 @@ print seq_to_str(visual_sample[0])
 
 duration = time.time()
 net = nn.Network()
-#network = net.create_network(np.shape(samples[0][1])[1]*3, len(alphabet)+1)        #x3 for the window
-network = net.create_network(240, len(alphabet)+1)        #x3 for the window
+#network = net.create_network(240, len(alphabet)+1)        #x3 for the window
+#print 'built network - num samples:', len(samples), '\tDuration: %f' % (time.time()-duration)
+
+network = net.load_network('cpu2/5.pkl', 240, len(alphabet)+1, .001, .25)        #x3 for the window
 print 'built network - num samples:', len(samples), '\tDuration: %f' % (time.time()-duration)
 
 
@@ -119,13 +121,15 @@ try:
 
         print 'Epoch:', epoch, '\tAvg Error:', avg_error / len(samples), '\tin %0.3fs' %(time.time()-duration), '\t' + str(len(samples)), 'samples', '\tSamples/sec: %0.3f' % (len(samples)/(time.time()-duration)), '\tApprox. Speed: %0.3fx' % ((len(samples) * 5) / (time.time()-duration)), 'real-time'
 
+        
+        
+
         if epoch % 1 == 0:
-            net.dump_network('cpu/' + str(epoch) + '.pkl')
+            net.dump_network('cpu2/' + str(epoch) + '.pkl')
 
             pred = network.tester(visual_sample[1])[0]
             
             print seq_to_str(visual_sample[0]), '||', seq_to_str([np.argmax(x) for x in pred])
-
            
 except KeyboardInterrupt:
     for s in samples:

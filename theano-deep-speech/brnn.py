@@ -30,22 +30,15 @@ class FeedForwardLayer:
         self.activation_fn = lambda x: T.minimum(x * (x > 0), 20)
         
         if parameters is None:
-            W = U.create_shared(U.initial_weights(input_size, output_size), name='W')
-            b = U.create_shared(U.initial_weights(output_size), name='b')
+            self.W = U.create_shared(U.initial_weights(input_size, output_size), name='W')
+            self.b = U.create_shared(U.initial_weights(output_size), name='b')
         else:
-            W = theano.shared(parameters['W'], name='W')
-            b = theano.shared(parameters['b'], name='b')
+            self.W = theano.shared(parameters['W'], name='W')
+            self.b = theano.shared(parameters['b'], name='b')
         
-        self.output = self.activation_fn(T.dot(inputs, W) + b)
+        self.output = self.activation_fn(T.dot(inputs, self.W) + self.b)
 
-        '''
-        self.output, _ = theano.scan(
-            #lambda element: T.nnet.softplus(T.dot(element, W) + b),
-            lambda element: self.activation_fn(T.dot(element, W) + b),
-            sequences=[inputs]
-        )'''
-
-        self.params = [W, b]
+        self.params = [self.W, self.b]
         
     def get_parameters(self):
         params = {}
@@ -59,13 +52,13 @@ class RecurrentLayer:
     def __init__(self, inputs, input_size, output_size, is_backward=False, parameters=None):
     
         if parameters is None:
-            W_if = U.create_shared(U.initial_weights(input_size, output_size), name='W_if')
-            W_ff = U.create_shared(U.initial_weights(output_size, output_size), name='W_ff')
-            b = U.create_shared(U.initial_weights(output_size), name='b')
+            self.W_if = U.create_shared(U.initial_weights(input_size, output_size), name='W_if')
+            self.W_ff = U.create_shared(U.initial_weights(output_size, output_size), name='W_ff')
+            self.b = U.create_shared(U.initial_weights(output_size), name='b')
         else:
-            W_if = theano.shared(parameters['W_if'], name='W_if')
-            W_ff = theano.shared(parameters['W_ff'], name='W_ff')
-            b = theano.shared(parameters['b'], name='b')
+            self.W_if = theano.shared(parameters['W_if'], name='W_if')
+            self.W_ff = theano.shared(parameters['W_ff'], name='W_ff')
+            self.b = theano.shared(parameters['b'], name='b')
             
         initial = U.create_shared(U.initial_weights(output_size))
 
@@ -73,7 +66,7 @@ class RecurrentLayer:
         self.is_backward = is_backward
 
         def step(in_t, out_tminus1):
-            return self.activation_fn(T.dot(out_tminus1, W_ff) + T.dot(in_t, W_if) + b)
+            return self.activation_fn(T.dot(out_tminus1, self.W_ff) + T.dot(in_t, self.W_if) + self.b)
 
         self.output, _ = theano.scan(
             step,
@@ -82,7 +75,7 @@ class RecurrentLayer:
             go_backwards=self.is_backward
         )
 
-        self.params = [W_if, W_ff, b]
+        self.params = [self.W_if, self.W_ff, self.b]
         
     def get_parameters(self):
         params = {}
@@ -95,14 +88,14 @@ class SoftmaxLayer:
     def __init__(self, inputs, input_size, output_size, parameters=None):
     
         if parameters is None:
-            W = U.create_shared(U.initial_weights(input_size, output_size), name='W')
-            b = U.create_shared(U.initial_weights(output_size), name='b')
+            self.W = U.create_shared(U.initial_weights(input_size, output_size), name='W')
+            self.b = U.create_shared(U.initial_weights(output_size), name='b')
         else:
-            W = theano.shared(parameters['W'], name='W')
-            b = theano.shared(parameters['b'], name='b')
+            self.W = theano.shared(parameters['W'], name='W')
+            self.b = theano.shared(parameters['b'], name='b')
 
-        self.output = T.nnet.softmax(T.dot(inputs, W) + b)
-        self.params = [W, b]
+        self.output = T.nnet.softmax(T.dot(inputs, self.W) + self.b)
+        self.params = [self.W, self.b]
         
     def get_parameters(self):
         params = {}
@@ -170,12 +163,13 @@ class BRNN:
             self.s = SoftmaxLayer(T.concatenate((self.rf.output, self.rb.output), axis=1), 2*250, output_dimensionality, params[5])
             
         ctc = CTCLayer(self.s.output, labels, output_dimensionality-1)
+        l2 = T.sum(self.ff1.W**2) + T.sum(self.ff2.W**2) + T.sum(self.ff3.W**2) + T.sum(self.s.W**2) + T.sum(self.rf.W_if**2) + T.sum(self.rf.W_ff**2) + T.sum(self.rb.W_if**2) + T.sum(self.rb.W_ff**2)
 
         updates = []
         for layer in (self.ff1, self.ff2, self.ff3, self.rf, self.rb, self.s):
             for p in layer.params:
                 param_update = theano.shared(p.get_value()*0., broadcastable=p.broadcastable)
-                grad = T.grad(ctc.cost, p)
+                grad = T.grad(ctc.cost - .005*l2, p)
                 updates.append((p, p-learning_rate*param_update))
                 updates.append((param_update, momentum_rate*param_update + (1. - momentum_rate)*grad))
 
