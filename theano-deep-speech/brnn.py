@@ -12,9 +12,10 @@ import theano.tensor as T
 from theano_toolkit import utils as U
 from theano_toolkit import updates
 import numpy as np
+import cPickle as pickle
 
 #THEANO_FLAGS='device=cpu,floatX=float32'
-theano.config.warn_float64='warn'
+theano.config.warn_float64='ignore'
 
 #theano.config.optimizer = 'fast_compile'
 theano.config.exception_verbosity='high'
@@ -25,55 +26,89 @@ def clipped_relu(x): return np.min(np.max(0, x), 20)
 
 
 class FeedForwardLayer:
-    def __init__(self, inputs, input_size, output_size):
+    def __init__(self, inputs, input_size, output_size, parameters=None):
         self.activation_fn = lambda x: T.minimum(x * (x > 0), 20)
+        
+        if parameters is None:
+            W = U.create_shared(U.initial_weights(input_size, output_size), name='W')
+            b = U.create_shared(U.initial_weights(output_size), name='b')
+        else:
+            W = theano.shared(parameters['W'], name='W')
+            b = theano.shared(parameters['b'], name='b')
+        
+        self.output = self.activation_fn(T.dot(inputs, W) + b)
 
-        W = U.create_shared(U.initial_weights(input_size, output_size))
-        b = U.create_shared(U.initial_weights(output_size))
-
-        #def step(in_t, out_tminus1):
-        #    return T.tanh(T.dot(int_t, W) + b)
-
+        '''
         self.output, _ = theano.scan(
             #lambda element: T.nnet.softplus(T.dot(element, W) + b),
             lambda element: self.activation_fn(T.dot(element, W) + b),
             sequences=[inputs]
-        )
+        )'''
 
         self.params = [W, b]
+        
+    def get_parameters(self):
+        params = {}
+        for param in self.params:
+            params[param.name] = param.get_value()
+        return params
 
 
 
 class RecurrentLayer:
-    def __init__(self, inputs, input_size, output_size, is_backward=False):
-        W_if = U.create_shared(U.initial_weights(input_size, output_size))
-        W_ff = U.create_shared(U.initial_weights(output_size, output_size))
-        b = U.create_shared(U.initial_weights(output_size))
+    def __init__(self, inputs, input_size, output_size, is_backward=False, parameters=None):
+    
+        if parameters is None:
+            W_if = U.create_shared(U.initial_weights(input_size, output_size), name='W_if')
+            W_ff = U.create_shared(U.initial_weights(output_size, output_size), name='W_ff')
+            b = U.create_shared(U.initial_weights(output_size), name='b')
+        else:
+            W_if = theano.shared(parameters['W_if'], name='W_if')
+            W_ff = theano.shared(parameters['W_ff'], name='W_ff')
+            b = theano.shared(parameters['b'], name='b')
+            
         initial = U.create_shared(U.initial_weights(output_size))
 
         self.activation_fn = lambda x: T.minimum(x * (x > 0), 20)
+        self.is_backward = is_backward
 
         def step(in_t, out_tminus1):
-            #return T.nnet.softplus(T.dot(out_tminus1, W_ff) + T.dot(in_t, W_if) + b)
             return self.activation_fn(T.dot(out_tminus1, W_ff) + T.dot(in_t, W_if) + b)
 
         self.output, _ = theano.scan(
             step,
             sequences=[inputs],
             outputs_info=[initial],
-            go_backwards=is_backward
+            go_backwards=self.is_backward
         )
 
-        self.params = [W_if, W_ff, b, initial]
+        self.params = [W_if, W_ff, b]
+        
+    def get_parameters(self):
+        params = {}
+        for param in self.params:
+            params[param.name] = param.get_value()
+        return params
+        
 
 class SoftmaxLayer:
-    def __init__(self, inputs, input_size, output_size):
-        W = U.create_shared(U.initial_weights(input_size, output_size))
-        b = U.create_shared(U.initial_weights(output_size))
+    def __init__(self, inputs, input_size, output_size, parameters=None):
+    
+        if parameters is None:
+            W = U.create_shared(U.initial_weights(input_size, output_size), name='W')
+            b = U.create_shared(U.initial_weights(output_size), name='b')
+        else:
+            W = theano.shared(parameters['W'], name='W')
+            b = theano.shared(parameters['b'], name='b')
 
         self.output = T.nnet.softmax(T.dot(inputs, W) + b)
         self.params = [W, b]
-
+        
+    def get_parameters(self):
+        params = {}
+        for param in self.params:
+            params[param.name] = param.get_value()
+        return params
 
 # Courtesy of https://github.com/rakeshvar/rnn_ctc
 class CTCLayer():
@@ -89,18 +124,12 @@ class CTCLayer():
             b) the next to next label is different from the current
             (Second upper diagonal is product of conditons a & b)
         '''
-        #labels2 = T.concatenate((labels, [blank, blank]))
-        #sec_diag = T.neq(labels2[:-2], labels2[2:]) * T.eq(labels2[1:-1], blank)
         n_labels = labels.shape[0]
-
-        #recurrence_relation = \
-        #       T.eye(n_labels) + \
-        #       T.eye(n_labels, k=1) + \
-        #       T.eye(n_labels, k=2) * sec_diag.dimshuffle((0, 'x'))
         
-        big_I = T.cast(T.eye(n_labels+2), 'float32')
-        recurrence_relation = T.cast(T.eye(n_labels), 'float32') + big_I[2:,1:-1] + big_I[2:,:-2] * T.cast((T.arange(n_labels) % 2), 'float32')
-        recurrence_relation = T.cast(recurrence_relation, 'float32')
+        big_I = T.cast(T.eye(n_labels+2), 'float64')
+        recurrence_relation = T.cast(T.eye(n_labels), 'float64') + big_I[2:,1:-1] + big_I[2:,:-2] * T.cast((T.arange(n_labels) % 2), 'float64')
+        recurrence_relation = T.cast(recurrence_relation, 'float64')
+        
         '''
         Forward path probabilities
         '''
@@ -109,17 +138,9 @@ class CTCLayer():
         probabilities, _ = theano.scan(
             lambda curr, prev: curr * T.dot(prev, recurrence_relation),
             sequences=[pred_y],
-            outputs_info=[T.cast(T.eye(n_labels)[0], 'float32')]
+            outputs_info=[T.cast(T.eye(n_labels)[0], 'float64')]
         )
 
-
-        '''
-        pred_y = T.log(pred_y)                          # Probabilities in log scale
-        log_scale_probabilities, _ = theano.scan(
-            lambda curr, prev: curr * T.dot(prev, recurrence_relation),
-            sequences=[pred_y],
-            outputs_info=[T.eye(n_labels)[0]]    # initial state in log scale
-        )'''
 
         # Final Costs
         labels_probab = T.sum(probabilities[-1, -2:])
@@ -127,31 +148,40 @@ class CTCLayer():
         self.params = []
         self.debug = probabilities.T
 
+
 class BRNN:
-    def __init__(self, input_dimensionality, output_dimensionality):
+    def __init__(self, input_dimensionality, output_dimensionality, params=None, learning_rate=.01, momentum_rate=.25):
         inputs = T.matrix('input_seq')
         labels = T.ivector('labels')
-        momentum = .25
-
-        ff1 = FeedForwardLayer(inputs, input_dimensionality, 200)
-        ff2 = FeedForwardLayer(ff1.output, 200, 100)
-        ff3 = FeedForwardLayer(ff2.output, 100, 50)
-        rf = RecurrentLayer(ff3.output, 50, 25, False)     # Forward layer
-        rb = RecurrentLayer(ff3.output, 50, 25, True)      # Backward layer
-        s = SoftmaxLayer(T.concatenate((rf.output, rb.output), axis=1), 2*25, output_dimensionality)
-        ctc = CTCLayer(s.output, labels, output_dimensionality-1)
+        
+        if params is None:
+            self.ff1 = FeedForwardLayer(inputs, input_dimensionality, 2000)
+            self.ff2 = FeedForwardLayer(self.ff1.output, 2000, 1000)
+            self.ff3 = FeedForwardLayer(self.ff2.output, 1000, 500)
+            self.rf = RecurrentLayer(self.ff3.output, 500, 250, False)     # Forward layer
+            self.rb = RecurrentLayer(self.ff3.output, 500, 250, True)      # Backward layer
+            self.s = SoftmaxLayer(T.concatenate((self.rf.output, self.rb.output), axis=1), 2*250, output_dimensionality)
+        else:
+            self.ff1 = FeedForwardLayer(inputs, input_dimensionality, 2000, params[0])
+            self.ff2 = FeedForwardLayer(self.ff1.output, 2000, 1000, params[1])
+            self.ff3 = FeedForwardLayer(self.ff2.output, 1000, 500, params[2])
+            self.rf = RecurrentLayer(self.ff3.output, 500, 250, False, params[3])     # Forward layer
+            self.rb = RecurrentLayer(self.ff3.output, 500, 250, True, params[4])      # Backward layer
+            self.s = SoftmaxLayer(T.concatenate((self.rf.output, self.rb.output), axis=1), 2*250, output_dimensionality, params[5])
+            
+        ctc = CTCLayer(self.s.output, labels, output_dimensionality-1)
 
         updates = []
-        for layer in (ff1, ff2, ff3, rf, rb, s, ctc):
+        for layer in (self.ff1, self.ff2, self.ff3, self.rf, self.rb, self.s):
             for p in layer.params:
                 param_update = theano.shared(p.get_value()*0., broadcastable=p.broadcastable)
                 grad = T.grad(ctc.cost, p)
-                updates.append((p, p-.01*param_update))
-                updates.append((param_update, momentum*param_update + (1. - momentum)*grad))
+                updates.append((p, p-learning_rate*param_update))
+                updates.append((param_update, momentum_rate*param_update + (1. - momentum_rate)*grad))
 
         self.trainer = theano.function(
             inputs=[inputs, labels],
-            outputs=[ctc.cost, s.output],
+            outputs=[ctc.cost, self.s.output],
             updates=updates
         )
 
@@ -162,5 +192,41 @@ class BRNN:
 
         self.tester = theano.function(
             inputs=[inputs],
-            outputs=[s.output]
+            outputs=[self.s.output]
         )
+    
+    def dump(self, f_path):
+        f = file(f_path, 'wb')
+        for obj in [self.ff1.get_parameters(), self.ff2.get_parameters(), self.ff3.get_parameters(), self.rf.get_parameters(), self.rb.get_parameters(), self.s.get_parameters()]:
+            pickle.dump(obj, f, protocol=pickle.HIGHEST_PROTOCOL)
+        f.close()
+        
+class Network:
+    def __init__(self):
+        self.nn = None
+
+    def create_network(self, input_dimensionality, output_dimensionality, learning_rate=0.001, momentum=.99):
+        self.nn = BRNN(input_dimensionality, output_dimensionality, params=None, learning_rate=learning_rate, momentum_rate=momentum)
+        return self.nn
+
+    def load_network(self, path, input_dimensionality, output_dimensionality, learning_rate=0.001, momentum=.99):
+        f = file(path, 'rb')
+        parameters = []
+        for i in np.arange(6):
+            parameters.append(pickle.load(f))
+        f.close()
+
+        for p in parameters:
+            print type(p)
+
+        self.nn = BRNN(input_dimensionality, output_dimensionality, params=parameters, learning_rate=learning_rate, momentum_rate=momentum)
+        return self.nn
+
+    def dump_network(self, path):
+        if self.nn is None:
+            return False
+
+        self.nn.dump(path)
+        
+        
+
