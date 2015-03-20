@@ -123,7 +123,7 @@ print seq_to_str(visual_sample2[0])
 
 
 # PARAMETERS
-epoch_size = 10        # mini-batches per epoch (model is stored at the end of this many mini-batches)
+epoch_size = 100        # mini-batches per epoch (model is stored at the end of this many mini-batches)
 batch_size = 100        # mini-batch size
 
 # HYPER-PARAMETERS
@@ -151,17 +151,56 @@ try:
         log_it(log_file, etc='loaded Network - num samples:' + str(len(samples)) + '\tDuration: ' + str(time.time()-duration))
     log_file.close()
 
+    if last_good == -1:
+        error_avg_epoch = 0.0
+        duration = time.time()
+
+        # For each bucket of samples
+        for length in lp_lens:
+
+            sequence_length = length
+
+            for i in np.arange(0, math.ceil(sequence_length/batch_size)):
+
+                temp_model = network.get_parameters()
+
+                num_samples_in_selected = batch_dict[sequence_length][1].shape[0] - (i*batch_size)    # get the number of available samples in the bucket
+
+                if num_samples_in_selected < batch_size:
+                    minibatch_start = 0
+                    minibatch_end = num_samples_in_selected
+                else:
+                    minibatch_start = i * batch_size
+                    minibatch_end = minibatch_start + batch_size
+
+                cost, _ = network.trainer(batch_dict[sequence_length][1][minibatch_start:minibatch_end, :, :], batch_dict[sequence_length][0][minibatch_start:minibatch_end, :])
+
+                if math.isnan(cost) or math.isinf(cost):
+                    restart = True
+                    network.set_parameters(temp_model)
+                    #raw_input("Hit NAN on sequential first-round input!! Very bad...")
+                    print("Hit NAN on sequential first-round input!! Very bad...")
+                    break
+
+                error_avg_epoch += cost
+                print '\t', cost, minibatch_end-minibatch_start, time.time()-duration
+
+
+
+
     # Start a new Epoch
     for epoch in np.arange(last_good+1, 100000):
+
+        error_avg_epoch = 0.0
+        duration = time.time()
 
         # For each desired mini-batch
         for minibatch in np.arange(epoch_size):
 
-            sequence_length_index = rng.randint(0, 1)#len(lp_lens))                                # randomly select a bucket of samples to create a mini-batch from
+            sequence_length_index = rng.randint(0, len(lp_lens))                                # randomly select a bucket of samples to create a mini-batch from
             sequence_length = lp_lens[sequence_length_index]
 
             num_samples_in_selected = batch_dict[sequence_length][1].shape[0]    # get the number of available samples in the bucket
-            print batch_dict[sequence_length][1].shape
             
             if num_samples_in_selected < batch_size:
                 minibatch_start = 0
@@ -170,9 +209,44 @@ try:
                 minibatch_start = rng.randint(0, len(lp_lens))
                 minibatch_end = minibatch_start + batch_size
 
-            cost, pred = network.trainer(batch_dict[sequence_length][1][minibatch_start:minibatch_end, :, :], batch_dict[sequence_length][0][minibatch_start:minibatch_end, :])
-            
-            print cost
+            cost, _ = network.trainer(batch_dict[sequence_length][1][minibatch_start:minibatch_end, :, :], batch_dict[sequence_length][0][minibatch_start:minibatch_end, :])
+
+            if math.isnan(cost) or math.isinf(cost):
+                restart = True
+                break
+
+            error_avg_epoch += cost
+            print '\t', cost, minibatch_end-minibatch_start, time.time()-duration
+
+
+        log_file = file('status.html', 'a') #file('/var/www/html/status.html', 'a')
+        if not restart:
+
+            print 'Avg. Error:', error_avg_epoch, ' || over', batch_dict[sequence_length][1].shape, '\tsamples\t | in %.3fs' % (time.time() - duration)
+
+            pred = network.tester(visual_sample[1])[0]
+            log_it(log_file, etc='\t' + seq_to_str(visual_sample[0]) + ' || ' + seq_to_str([np.argmax(x) for x in pred]))
+            pred2 = network.tester(visual_sample2[1])[0]
+            log_it(log_file, etc='\t' + seq_to_str(visual_sample2[0]) + ' || ' + seq_to_str([np.argmax(x) for x in pred2]) + '\t===Diff: ' + str(np.mean(pred2-pred)))
+
+            if epoch % 10: #epoch_size:
+                dumpPath = 'saved_models_batch/' + str(epoch) + '.pkl'
+                print 'Saving to: ', dumpPath
+                net.dump_network(dumpPath)
+
+                last_good = epoch
+
+        else:
+            log_it(log_file, nan=True)
+            restart = False
+
+            duration = time.time()
+            picklePath = 'saved_models_batch/' + str(last_good) + '.pkl'
+            print 'loading from', picklePath
+            network = net.load_network(picklePath, 560, len(alphabet)+1, .0005, .75)        #x3 for the window
+            log_it(log_file, etc='loaded Network - num samples:' + str(len(samples)) + '\tDuration: ' + str(time.time()-duration))
+        log_file.close()
+
 
 except KeyboardInterrupt:
     pass

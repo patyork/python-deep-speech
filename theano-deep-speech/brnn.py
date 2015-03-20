@@ -46,6 +46,10 @@ class FeedForwardLayer:
             params[param.name] = param.get_value()
         return params
 
+    def set_parameters(self, params):
+        self.W.set_value(params['W'])
+        self.b.set_value(params['b'])
+
 
 
 class RecurrentLayer:
@@ -89,6 +93,11 @@ class RecurrentLayer:
         for param in self.params:
             params[param.name] = param.get_value()
         return params
+
+    def set_parameters(self, params):
+        self.W_if.set_value(params['W_if'])
+        self.W_ff.set_value(params['W_ff'])
+        self.b.set_value(params['b'])
         
 
 class SoftmaxLayer:
@@ -116,6 +125,11 @@ class SoftmaxLayer:
             params[param.name] = param.get_value()
         return params
 
+    def set_parameters(self, params):
+        self.W.set_value(params['W'])
+        self.b.set_value(params['b'])
+
+
 # Courtesy of https://github.com/rakeshvar/rnn_ctc
 class CTCLayer():
     def __init__(self, inpt, labels, blank):
@@ -141,9 +155,9 @@ class CTCLayer():
             '''
             Forward path probabilities
             '''
-            big_I = T.cast(T.eye(n_labels+2), 'float64')
-            recurrence_relation = T.cast(T.eye(n_labels), 'float64') + big_I[2:,1:-1] + big_I[2:,:-2] * T.cast((T.arange(n_labels) % 2), 'float64')
-            recurrence_relation = T.cast(recurrence_relation, 'float64')
+            #big_I = T.cast(T.eye(n_labels+2), 'float64')
+            #recurrence_relation = T.cast(T.eye(n_labels), 'float64') + big_I[2:,1:-1] + big_I[2:,:-2] * T.cast((T.arange(n_labels) % 2), 'float64')
+            #recurrence_relation = T.cast(recurrence_relation, 'float64')
             pred_y = input[:, label]
 
             probabilities, _ = theano.scan(
@@ -218,6 +232,14 @@ class BRNN:
         
     def get_parameters(self):
         return [self.ff1.get_parameters(), self.ff2.get_parameters(), self.ff3.get_parameters(), self.rf.get_parameters(), self.rb.get_parameters(), self.s.get_parameters()]
+
+    def set_parameters(self, parameters):
+        self.ff1.set_parameters(parameters[0])
+        self.ff2.set_parameters(parameters[1])
+        self.ff3.set_parameters(parameters[2])
+        self.rf.set_parameters(parameters[3])
+        self.rb.set_parameters(parameters[4])
+        self.s.set_parameters(parameters[5])
         
 class Network:
     def __init__(self):
@@ -240,8 +262,8 @@ class Network:
         self.nn = BRNN(input_dimensionality, output_dimensionality, params=parameters, learning_rate=learning_rate, momentum_rate=momentum, data_x=datax, data_y=datay)
         return self.nn
         
-    def set_network(self, path, input_dimensionality, output_dimensionality, learning_rate=0.001, momentum=.99):
-        pass #TODO
+    def set_network(self, parameters):
+        self.nn.set_parameters(parameters)
 
     def dump_network(self, path):
         if self.nn is None:
