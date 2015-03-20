@@ -72,7 +72,7 @@ for f in files:
         label_len = len(sample[0])
         label_prime_len = len(make_l_prime(str_to_seq(F(sample[0], len(alphabet))), len(alphabet)))
         num_buckets = np.shape(sample[1])[0]
-        if label_len < 37 and label_prime_len <= num_buckets:# and (float(num_buckets) / float(label_prime_len) < 3.0):
+        if label_len < 40 and label_prime_len <= num_buckets:# and (float(num_buckets) / float(label_prime_len) < 3.0):
             window_size = 1 # 1 frame of context on each side
             windowed = []
             for i in np.arange(window_size, len(sample[1])-window_size):
@@ -92,7 +92,7 @@ net = nn.Network()
 #network = net.create_network(240, len(alphabet)+1)        #x3 for the window
 #print 'built network - num samples:', len(samples), '\tDuration: %f' % (time.time()-duration)
 
-network = net.load_network('cpu2/5.pkl', 240, len(alphabet)+1, .001, .25)        #x3 for the window
+network = net.load_network('cpu2/54.pkl', 240, len(alphabet)+1, .001, .5)        #x3 for the window
 print 'built network - num samples:', len(samples), '\tDuration: %f' % (time.time()-duration)
 
 
@@ -125,7 +125,7 @@ try:
         
 
         if epoch % 1 == 0:
-            net.dump_network('cpu2/' + str(epoch) + '.pkl')
+            net.dump_network('cpu3/' + str(epoch) + '.pkl')
 
             pred = network.tester(visual_sample[1])[0]
             

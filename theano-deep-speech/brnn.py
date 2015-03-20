@@ -143,9 +143,10 @@ class CTCLayer():
 
 
 class BRNN:
-    def __init__(self, input_dimensionality, output_dimensionality, params=None, learning_rate=.01, momentum_rate=.25):
+    def __init__(self, input_dimensionality, output_dimensionality, data_x, data_y, params=None, learning_rate=.01, momentum_rate=.25):
         inputs = T.matrix('input_seq')
         labels = T.ivector('labels')
+        index = T.iscalar('index')
         
         if params is None:
             self.ff1 = FeedForwardLayer(inputs, input_dimensionality, 2000)
@@ -174,9 +175,15 @@ class BRNN:
                 updates.append((param_update, momentum_rate*param_update + (1. - momentum_rate)*grad))
 
         self.trainer = theano.function(
-            inputs=[inputs, labels],
+            #inputs=[inputs, labels],
+            inputs=[index],
             outputs=[ctc.cost, self.s.output],
-            updates=updates
+            updates=updates,
+            givens=
+                {
+                    inputs: data_x[index],
+                    labels: data_y[index]
+                }
         )
 
         self.validator = theano.function(
@@ -194,6 +201,9 @@ class BRNN:
         for obj in [self.ff1.get_parameters(), self.ff2.get_parameters(), self.ff3.get_parameters(), self.rf.get_parameters(), self.rb.get_parameters(), self.s.get_parameters()]:
             pickle.dump(obj, f, protocol=pickle.HIGHEST_PROTOCOL)
         f.close()
+        
+    def get_parameters(self):
+        return [self.ff1.get_parameters(), self.ff2.get_parameters(), self.ff3.get_parameters(), self.rf.get_parameters(), self.rb.get_parameters(), self.s.get_parameters()]
         
 class Network:
     def __init__(self):
@@ -215,12 +225,18 @@ class Network:
 
         self.nn = BRNN(input_dimensionality, output_dimensionality, params=parameters, learning_rate=learning_rate, momentum_rate=momentum)
         return self.nn
+        
+    def set_network(self, path, input_dimensionality, output_dimensionality, learning_rate=0.001, momentum=.99):
+        pass #TODO
 
     def dump_network(self, path):
         if self.nn is None:
             return False
 
         self.nn.dump(path)
+        
+    def get_network(self):
+        return self.nn.get_parameters()
         
         
 
