@@ -150,7 +150,7 @@ try:
         log_it(log_file, etc='loaded Network - num samples:' + str(len(samples)) + '\tDuration: ' + str(time.time()-duration))
     log_file.close()
 
-    '''if last_good == -1:
+    if last_good == -1:
         error_avg_epoch = 0.0
         duration = time.time()
 
@@ -160,14 +160,15 @@ try:
             sequence_length = length
 
             for i in np.arange(0, math.ceil(sequence_length/batch_size)):
+                duration2 = time.time()
 
                 temp_model = network.get_parameters()
 
                 num_samples_in_selected = batch_dict[sequence_length][1].shape[0] - (i*batch_size)    # get the number of available samples in the bucket
 
                 if num_samples_in_selected < batch_size:
-                    minibatch_start = 0
-                    minibatch_end = num_samples_in_selected
+                    minibatch_start = (i*batch_size)
+                    minibatch_end = (i*batch_size) + num_samples_in_selected
                 else:
                     minibatch_start = i * batch_size
                     minibatch_end = minibatch_start + batch_size
@@ -184,7 +185,7 @@ try:
                     break
 
                 error_avg_epoch += cost
-                print '\t', cost, minibatch_end-minibatch_start, time.time()-duration'''
+                print '\t', cost, minibatch_end-minibatch_start, time.time()-duration2
 
 
 
