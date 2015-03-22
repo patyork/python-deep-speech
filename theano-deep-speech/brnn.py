@@ -149,19 +149,19 @@ class BRNN:
         #index = T.iscalar('index')
         
         if params is None:
-            self.ff1 = FeedForwardLayer(inputs, input_dimensionality, 2000)
-            self.ff2 = FeedForwardLayer(self.ff1.output, 2000, 1000)
-            self.ff3 = FeedForwardLayer(self.ff2.output, 1000, 500)
-            self.rf = RecurrentLayer(self.ff3.output, 500, 250, False)     # Forward layer
-            self.rb = RecurrentLayer(self.ff3.output, 500, 250, True)      # Backward layer
-            self.s = SoftmaxLayer(T.concatenate((self.rf.output, self.rb.output), axis=1), 2*250, output_dimensionality)
+            self.ff1 = FeedForwardLayer(inputs, input_dimensionality, 3000)
+            self.ff2 = FeedForwardLayer(self.ff1.output, 3000, 2000)
+            self.ff3 = FeedForwardLayer(self.ff2.output, 2000, 500)
+            self.rf = RecurrentLayer(self.ff3.output, 500, 300, False)     # Forward layer
+            self.rb = RecurrentLayer(self.ff3.output, 500, 300, True)      # Backward layer
+            self.s = SoftmaxLayer(T.concatenate((self.rf.output, self.rb.output), axis=1), 2*300, output_dimensionality)
         else:
-            self.ff1 = FeedForwardLayer(inputs, input_dimensionality, 2000, params[0])
-            self.ff2 = FeedForwardLayer(self.ff1.output, 2000, 1000, params[1])
-            self.ff3 = FeedForwardLayer(self.ff2.output, 1000, 500, params[2])
-            self.rf = RecurrentLayer(self.ff3.output, 500, 250, False, params[3])     # Forward layer
-            self.rb = RecurrentLayer(self.ff3.output, 500, 250, True, params[4])      # Backward layer
-            self.s = SoftmaxLayer(T.concatenate((self.rf.output, self.rb.output), axis=1), 2*250, output_dimensionality, params[5])
+            self.ff1 = FeedForwardLayer(inputs, input_dimensionality, 3000, params[0])
+            self.ff2 = FeedForwardLayer(self.ff1.output, 3000, 2000, params[1])
+            self.ff3 = FeedForwardLayer(self.ff2.output, 2000, 500, params[2])
+            self.rf = RecurrentLayer(self.ff3.output, 500, 300, False, params[3])     # Forward layer
+            self.rb = RecurrentLayer(self.ff3.output, 500, 300, True, params[4])      # Backward layer
+            self.s = SoftmaxLayer(T.concatenate((self.rf.output, self.rb.output), axis=1), 2*300, output_dimensionality, params[5])
             
         ctc = CTCLayer(self.s.output, labels, output_dimensionality-1)
         l2 = T.sum(self.ff1.W**2) + T.sum(self.ff2.W**2) + T.sum(self.ff3.W**2) + T.sum(self.s.W**2) + T.sum(self.rf.W_if**2) + T.sum(self.rf.W_ff**2) + T.sum(self.rb.W_if**2) + T.sum(self.rb.W_ff**2)

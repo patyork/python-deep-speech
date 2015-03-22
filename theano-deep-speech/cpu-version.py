@@ -54,15 +54,19 @@ def make_l_prime(l, blank):
     return result
     
     
-def log_it(f, epoch=None, error=None, etime=None, samples=None, saved_to=None, nan=False):
-    if nan is False:
-        s5 = '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'
-        message = time.strftime('%H:%M:%S') + 'Epoch: ' + str(epoch) + '\tAvg. Error: ' + str(error / samples) + '\tin ' + str(etime) + 's\t' +str(samples) + ' samples\tSamples/sec: ' + str(samples/etime) + '\tApprox. Speed: ' + str(samples * 5 / etime) + 'x real-time'
-        print message, '\n'
+def log_it(f, epoch=None, error=None, etime=None, samples=None, nan=False, etc=None):
+    s5 = '&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;'
+    if epoch is not None:
+        message = time.strftime('%H:%M:%S') + '\tEpoch: ' + str(epoch) + '\tAvg. Error: ' + str(error / samples) + '\tin ' + str(etime) + 's\t' +str(samples) + ' samples\tSamples/sec: ' + str(samples/etime) + '\tApprox. Speed: ' + str(samples * 5 / etime) + 'x real-time'
+        print '\n', message, '\n'
         f.write(message.replace('\t', s5) + '<br />')
-    else:
+    elif nan:
         print time.strftime('%H:%M:%S') + '\n========\nHIT NAN=======\nInvalidating Epoch\n===========\n'
-        f.write('\n' + time.strftime('%H:%M:%S') + '\n========\nHIT NAN=======\nInvalidating Epoch\n===========\n\n')
+        f.write('<br />' + time.strftime('%H:%M:%S') + '\n========\nHIT NAN=======\nInvalidating Epoch\n===========\n\n<br />')
+        
+    else:
+        print etc
+        f.write(time.strftime('%H:%M:%S') +s5+ etc.replace('\n', '<br />').replace('\t', s5) + '<br />')
 
 
 alphabet = np.arange(29) #[a,....,z, space, ', -]
@@ -73,7 +77,7 @@ import os
 samples = []
 directory = 'pickled'
 files = [os.path.join(directory, x) for x in os.listdir(directory)]
-files = files[:10]
+#files = files[:10]
 
 bad_characters = ['\\', '&', '.', ',', ':', '"', ';', '!']
 for f in files:
@@ -85,11 +89,11 @@ for f in files:
         label_len = len(sample[0])
         label_prime_len = len(make_l_prime(str_to_seq(F(sample[0], len(alphabet))), len(alphabet)))
         num_buckets = np.shape(sample[1])[0]
-        if label_len < 50 and label_prime_len <= num_buckets:# and (float(num_buckets) / float(label_prime_len) < 3.0):
-            window_size = 1 # 1 frame of context on each side
+        if label_len < 37 and label_prime_len <= num_buckets:# and (float(num_buckets) / float(label_prime_len) < 3.0):
+            window_size = 3 # 1 frame of context on each side
             windowed = []
             for i in np.arange(window_size, len(sample[1])-window_size):
-                windowed.append(np.concatenate((sample[1][i-1], sample[1][i], sample[1][i+1])))
+                windowed.append(np.concatenate(([sample[1][i+j] for j in np.arange(-window_size, window_size+1)])))
             
             # Remove bad characters, replace ordinals, create sample
             prompt = sample[0].translate(None, ''.join(bad_characters)).replace('0', 'zero').replace('1', 'one').replace('2', 'two').replace('3', 'three').replace('4', 'four').replace('5', 'five')
@@ -110,16 +114,21 @@ net = nn.Network()
 rng = np.random.RandomState(int(time.time()))
 
 try:
-    last_good = 18
+    last_good = -1
     restart = False
-    
+    log_file = file('/var/www/html/status.html', 'a')
     duration = time.time()
-    picklePath = 'cpu5/' + str(last_good) + '.pkl'
-    print 'loading from', picklePath
-    network = net.load_network(picklePath, 240, len(alphabet)+1, .001, .5)        #x3 for the window
-    print 'loaded Network - num samples:', len(samples), '\tDuration: %f' % (time.time()-duration)
+    if last_good == -1:
+        network = net.create_network(560, len(alphabet)+1, .0001, .25)        #x3 for the window
+        log_it(log_file, etc='created Network - num samples:' + str(len(samples)) + '\tDuration: ' + str(time.time()-duration))
+    else:
+        picklePath = 'win7/' + str(last_good) + '.pkl'
+        print 'loading from', picklePath
+        network = net.load_network(picklePath, 560, len(alphabet)+1, .0001, .25)        #x3 for the window
+        log_it(log_file, etc='loaded Network - num samples:' + str(len(samples)) + '\tDuration: ' + str(time.time()-duration))
+    log_file.close()
     
-    epoch_size = 1000 # Samples per epoch
+    epoch_size = 250 # Samples per epoch
     if len(samples) < epoch_size: epoch_size = len(samples)
     
     for epoch in np.arange(last_good+1, 100000):
@@ -141,14 +150,14 @@ try:
             log_it(log_file, epoch, error=avg_error, etime=(time.time()-duration), samples=epoch_size)
 
             if epoch % 1 == 0:
-                dumpPath = 'cpu5/' + str(epoch) + '.pkl'
+                dumpPath = 'win7/' + str(epoch) + '.pkl'
                 print 'Saving to: ', dumpPath
                 net.dump_network(dumpPath)
                 
                 pred = network.tester(visual_sample[1])[0]
-                print seq_to_str(visual_sample[0]), '||', seq_to_str([np.argmax(x) for x in pred])
+                log_it(log_file, etc='\t' + seq_to_str(visual_sample[0]) + ' || ' + seq_to_str([np.argmax(x) for x in pred]))
                 pred = network.tester(visual_sample2[1])[0]
-                print seq_to_str(visual_sample2[0]), '||', seq_to_str([np.argmax(x) for x in pred])
+                log_it(log_file, etc='\t' + seq_to_str(visual_sample2[0]) + ' || ' + seq_to_str([np.argmax(x) for x in pred]))
                 
                 last_good = epoch
                 
@@ -157,10 +166,10 @@ try:
             restart = False
             
             duration = time.time()
-            picklePath = 'cpu5/' + str(last_good) + '.pkl'
+            picklePath = 'win7/' + str(last_good) + '.pkl'
             print 'loading from', picklePath
-            network = net.load_network(picklePath, 240, len(alphabet)+1, .001, .5)        #x3 for the window
-            print 'loaded Network - num samples:', len(samples), '\tDuration: %f' % (time.time()-duration)
+            network = net.load_network(picklePath, 560, len(alphabet)+1, .0001, .25)        #x3 for the window
+            log_it(log_file, etc='loaded Network - num samples:' + str(len(samples)) + '\tDuration: ' + str(time.time()-duration))
         log_file.close()
            
 except KeyboardInterrupt:
@@ -169,5 +178,6 @@ except KeyboardInterrupt:
     if action == 'y':
         for s in samples:
             print seq_to_str(s[0]), '||', seq_to_str([np.argmax(x) for x in network.tester(s[1])[0]])
+       
             
             
