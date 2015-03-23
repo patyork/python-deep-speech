@@ -73,33 +73,10 @@ alphabet = np.arange(29) #[a,....,z, space, ', -]
 
 
 # Load samples
-import os
-samples = []
-directory = 'pickled'
-files = [os.path.join(directory, x) for x in os.listdir(directory)]
-#files = files[:10]
+f = open('win3_l35.pkl', 'rb')
+samples = pickle.load(f)
+f.close()
 
-bad_characters = ['\\', '&', '.', ',', ':', '"', ';', '!']
-for f in files:
-    submission = pickle.load(open(f, 'rb'))
-    print f, '\t\t\t',
-    count = 0
-    for sample in submission:
-        
-        label_len = len(sample[0])
-        label_prime_len = len(make_l_prime(str_to_seq(F(sample[0], len(alphabet))), len(alphabet)))
-        num_buckets = np.shape(sample[1])[0]
-        if label_len < 37 and label_prime_len <= num_buckets:# and (float(num_buckets) / float(label_prime_len) < 3.0):
-            window_size = 3 # 1 frame of context on each side
-            windowed = []
-            for i in np.arange(window_size, len(sample[1])-window_size):
-                windowed.append(np.concatenate(([sample[1][i+j] for j in np.arange(-window_size, window_size+1)])))
-            
-            # Remove bad characters, replace ordinals, create sample
-            prompt = sample[0].translate(None, ''.join(bad_characters)).replace('0', 'zero').replace('1', 'one').replace('2', 'two').replace('3', 'three').replace('4', 'four').replace('5', 'five')
-            samples.append( (make_l_prime(str_to_seq(F(prompt, len(alphabet))), len(alphabet)), windowed) )
-            count += 1
-    print count, 'samples selected'
             
 
 visual_sample = samples[0]
@@ -114,21 +91,21 @@ net = nn.Network()
 rng = np.random.RandomState(int(time.time()))
 
 try:
-    last_good = -1
+    last_good = 609
     restart = False
     log_file = file('/var/www/html/status.html', 'a')
     duration = time.time()
     if last_good == -1:
-        network = net.create_network(560, len(alphabet)+1, .0001, .25)        #x3 for the window
+        network = net.create_network(560, len(alphabet)+1, .0005, .75)        #x3 for the window
         log_it(log_file, etc='created Network - num samples:' + str(len(samples)) + '\tDuration: ' + str(time.time()-duration))
     else:
-        picklePath = 'win7/' + str(last_good) + '.pkl'
+        picklePath = 'saved_models/' + str(last_good) + '.pkl'
         print 'loading from', picklePath
-        network = net.load_network(picklePath, 560, len(alphabet)+1, .0001, .25)        #x3 for the window
+        network = net.load_network(picklePath, 560, len(alphabet)+1, .0005, .75)        #x3 for the window
         log_it(log_file, etc='loaded Network - num samples:' + str(len(samples)) + '\tDuration: ' + str(time.time()-duration))
     log_file.close()
     
-    epoch_size = 250 # Samples per epoch
+    epoch_size = 500 # Samples per epoch
     if len(samples) < epoch_size: epoch_size = len(samples)
     
     for epoch in np.arange(last_good+1, 100000):
@@ -150,14 +127,14 @@ try:
             log_it(log_file, epoch, error=avg_error, etime=(time.time()-duration), samples=epoch_size)
 
             if epoch % 1 == 0:
-                dumpPath = 'win7/' + str(epoch) + '.pkl'
+                dumpPath = 'saved_models/' + str(epoch) + '.pkl'
                 print 'Saving to: ', dumpPath
                 net.dump_network(dumpPath)
                 
                 pred = network.tester(visual_sample[1])[0]
                 log_it(log_file, etc='\t' + seq_to_str(visual_sample[0]) + ' || ' + seq_to_str([np.argmax(x) for x in pred]))
-                pred = network.tester(visual_sample2[1])[0]
-                log_it(log_file, etc='\t' + seq_to_str(visual_sample2[0]) + ' || ' + seq_to_str([np.argmax(x) for x in pred]))
+                pred2 = network.tester(visual_sample2[1])[0]
+                log_it(log_file, etc='\t' + seq_to_str(visual_sample2[0]) + ' || ' + seq_to_str([np.argmax(x) for x in pred2]) + '\t===Diff: ' + str(np.mean(pred2-pred)))
                 
                 last_good = epoch
                 
@@ -166,9 +143,9 @@ try:
             restart = False
             
             duration = time.time()
-            picklePath = 'win7/' + str(last_good) + '.pkl'
+            picklePath = 'saved_models/' + str(last_good) + '.pkl'
             print 'loading from', picklePath
-            network = net.load_network(picklePath, 560, len(alphabet)+1, .0001, .25)        #x3 for the window
+            network = net.load_network(picklePath, 560, len(alphabet)+1, .0005, .75)        #x3 for the window
             log_it(log_file, etc='loaded Network - num samples:' + str(len(samples)) + '\tDuration: ' + str(time.time()-duration))
         log_file.close()
            
