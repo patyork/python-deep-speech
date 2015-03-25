@@ -187,13 +187,12 @@ class BRNN:
         l2 = T.sum(self.ff1.W**2) + T.sum(self.ff2.W**2) + T.sum(self.ff3.W**2) + T.sum(self.s.W**2) + T.sum(self.rf.W_if**2) + T.sum(self.rf.W_ff**2) + T.sum(self.rb.W_if**2) + T.sum(self.rb.W_ff**2)
 
         updates = []
-        if not T.isnan(ctc.cost):
-            for layer in (self.ff1, self.ff2, self.ff3, self.rf, self.rb, self.s):
-                for p in layer.params:
-                    param_update = theano.shared(p.get_value()*0., broadcastable=p.broadcastable)
-                    grad = T.grad(ctc.cost - .005*l2, p)
-                    updates.append((p, p-learning_rate*param_update))
-                    updates.append((param_update, momentum_rate*param_update + (1. - momentum_rate)*grad))
+        for layer in (self.ff1, self.ff2, self.ff3, self.rf, self.rb, self.s):
+            for p in layer.params:
+                param_update = theano.shared(p.get_value()*0., broadcastable=p.broadcastable)
+                grad = T.grad(ctc.cost - .005*l2, p)
+                updates.append((p, p-learning_rate*param_update))
+                updates.append((param_update, momentum_rate*param_update + (1. - momentum_rate)*grad))
 
         self.trainer = theano.function(
             inputs=[inputs, labels],

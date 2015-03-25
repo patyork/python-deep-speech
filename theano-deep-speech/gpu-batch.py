@@ -78,16 +78,16 @@ f = open('win3_l35.pkl', 'rb')
 samples = pickle.load(f)
 f.close()
 
-print [len(s[0]) for s in samples]
+#print [len(s[0]) for s in samples]
 
 samples_sorted = sorted(samples, key=lambda s: len(s[0]))
 
 lens = [len(s[0]) for s in samples_sorted]
-print lens
+#print lens
 
 lp_lens = [key for key, _ in groupby(lens)]
-print lp_lens
-print
+#print lp_lens
+#print
 
 batch_dict = {}
 for length in lp_lens:
@@ -157,11 +157,12 @@ try:
         # For each desired mini-batch
         for minibatch in np.arange(epoch_size):
 
-            sequence_length_index = rng.randint(0, len(lp_lens))                                # randomly select a bucket of samples to create a mini-batch from
+            sequence_length_index = rng.randint(0, 1)#len(lp_lens))                                # randomly select a bucket of samples to create a mini-batch from
             sequence_length = lp_lens[sequence_length_index]
 
             num_samples_in_selected = batch_dict[sequence_length][1].shape[0]    # get the number of available samples in the bucket
             print batch_dict[sequence_length][1].shape
+            
             if num_samples_in_selected < batch_size:
                 minibatch_start = 0
                 minibatch_end = num_samples_in_selected
@@ -169,8 +170,9 @@ try:
                 minibatch_start = rng.randint(0, len(lp_lens))
                 minibatch_end = minibatch_start + batch_size
 
-
             cost, pred = network.trainer(batch_dict[sequence_length][1][minibatch_start:minibatch_end, :, :], batch_dict[sequence_length][0][minibatch_start:minibatch_end, :])
+            
+            print cost
 
 except KeyboardInterrupt:
     pass
